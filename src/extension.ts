@@ -191,6 +191,61 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             vscode.window.showInformationMessage('测试评论已创建，每个用户将显示不同的颜色！');
+        }),
+
+        // ================== 新的同步相关命令 ==================
+
+        // 显示同步方法选择器
+        vscode.commands.registerCommand('code-review-notes.showSyncMethodPicker', async () => {
+            await commentService.showSyncMethodPicker();
+        }),
+
+        // 执行完整同步
+        vscode.commands.registerCommand('code-review-notes.performFullSync', async () => {
+            try {
+                await commentService.performFullSync();
+            } catch (error) {
+                console.error('Full sync command failed:', error);
+            }
+        }),
+
+        // 获取同步状态
+        vscode.commands.registerCommand('code-review-notes.getSyncStatus', async () => {
+            try {
+                const status = await commentService.getSyncStatus();
+                vscode.window.showInformationMessage(`同步状态: ${status}`);
+            } catch (error) {
+                vscode.window.showErrorMessage(`获取同步状态失败: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            }
+        }),
+
+        // ================== 向后兼容的 Git 同步命令 ==================
+
+        // 同步评论到Git
+        vscode.commands.registerCommand('code-review-notes.syncComments', async () => {
+            try {
+                await commentService.syncToGit();
+            } catch (error) {
+                console.error('Sync to Git command failed:', error);
+            }
+        }),
+
+        // 从Git加载评论
+        vscode.commands.registerCommand('code-review-notes.loadCommentsFromGit', async () => {
+            try {
+                await commentService.loadFromGit();
+            } catch (error) {
+                console.error('Load from Git command failed:', error);
+            }
+        }),
+
+        // 启用自动同步
+        vscode.commands.registerCommand('code-review-notes.enableAutoSync', async () => {
+            try {
+                await commentService.enableAutoSync();
+            } catch (error) {
+                console.error('Enable auto sync command failed:', error);
+            }
         })
     ];
 

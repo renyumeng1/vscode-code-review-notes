@@ -2,23 +2,18 @@ import * as vscode from 'vscode';
 import { Comment, CommentReply, CommentRange, CommentData } from './types';
 import { v4 as uuidv4 } from 'uuid';
 import { SyncManager } from './syncManager';
-import { SyncMethod } from './syncStrategy';
 
 /**
  * 评论服务类，负责管理评论数据的CRUD操作
  */
 export class CommentService {
     private static readonly STORAGE_KEY = 'codeReviewNotes.comments';
-    private static readonly DATA_VERSION = '1.0.0';
-    
-    private comments: Comment[] = [];
+    private static readonly DATA_VERSION = '1.0.0';    private comments: Comment[] = [];
     private context: vscode.ExtensionContext;
     private syncManager: SyncManager;
     private _onDidChangeComments = new vscode.EventEmitter<void>();
     
-    readonly onDidChangeComments = this._onDidChangeComments.event;
-
-    constructor(context: vscode.ExtensionContext) {
+    readonly onDidChangeComments = this._onDidChangeComments.event;    constructor(context: vscode.ExtensionContext) {
         this.context = context;
         this.syncManager = new SyncManager(context);
         // 异步加载评论
@@ -97,9 +92,7 @@ export class CommentService {
         this._onDidChangeComments.fire();
         
         return reply;
-    }
-
-    /**
+    }    /**
      * 解决评论
      */
     resolveComment(commentId: string, resolvedBy?: string): boolean {
@@ -148,31 +141,69 @@ export class CommentService {
         this._onDidChangeComments.fire();
         
         return true;
-    }
-
-    /**
+    }    /**
      * 从持久化存储加载评论
      */
     private async loadComments(): Promise<void> {
         try {
-            // 使用同步管理器加载评论
-            const loadedComments = await this.syncManager.loadComments();
-            this.comments = loadedComments;
+            // 首先从本地状态加载
+            const data = this.context.workspaceState.get<CommentData>(CommentService.STORAGE_KEY);
+            let localComments: Comment[] = [];
+            
+            if (data && data.comments) {
+                localComments = data.comments;
+            }
+
+            // 如果启用Git同步，尝试从Git文件加载并合并
+            const config = vscode.workspace.getConfiguration('codeReviewNotes');
+            const gitSyncEnabled = config.get<boolean>('gitSyncEnabled', true);
+              if (gitSyncEnabled) {
+                try {
+                    const gitComments = await this.gitSyncStrategy.loadCommentsFromFile();
+                    if (gitComments.length > 0) {
+                        // 合并本地和Git评论
+                        this.comments = this.gitSyncStrategy.mergeComments(localComments, gitComments);
+                        // 同步回本地状态
+                        const data: CommentData = {
+                            comments: this.comments,
+                            version: CommentService.DATA_VERSION
+                        };
+                        await this.context.workspaceState.update(CommentService.STORAGE_KEY, data);
+                        return;
+                    }
+                } catch (error) {
+                    console.warn('Failed to load from Git, using local comments:', error);
+                }
+            }
+
+            // 如果Git同步失败或未启用，使用本地评论
+            this.comments = localComments;
+            
         } catch (error) {
             console.error('Failed to load comments:', error);
             this.comments = [];
         }
-    }
-
-    /**
+    }/**
      * 保存评论到持久化存储
      */
     private async saveComments(): Promise<void> {
         try {
-            // 使用同步管理器保存评论
-            const result = await this.syncManager.saveComments(this.comments);
-            if (!result.success) {
-                console.warn('Save comments warning:', result.message);
+            // 保存到本地状态
+            const data: CommentData = {
+                comments: this.comments,
+                version: CommentService.DATA_VERSION
+            };
+            await this.context.workspaceState.update(CommentService.STORAGE_KEY, data);
+
+            // 如果启用Git同步，同时保存到文件
+            const config = vscode.workspace.getConfiguration('codeReviewNotes');
+            const gitSyncEnabled = config.get<boolean>('gitSyncEnabled', true);
+              if (gitSyncEnabled) {
+                try {
+                    await this.gitSyncStrategy.saveCommentsToFile(this.comments);
+                } catch (error) {
+                    console.warn('Git sync failed, continuing with local save:', error);
+                }
             }
         } catch (error) {
             console.error('Failed to save comments:', error);
@@ -230,116 +261,49 @@ export class CommentService {
         }
 
         return username?.trim();
-    }
-
-    // ================== 同步相关方法 ==================
-
-    /**
-     * 手动执行完整同步
+    }    /**
+     * 手动同步到Git
      */
-    async performFullSync(): Promise<void> {
+    async syncToGit(): Promise<void> {
         try {
-            const mergedComments = await this.syncManager.performFullSync(this.comments);
+            const mergedComments = await this.gitSyncStrategy.performFullSync(this.comments);
             this.comments = mergedComments;
             this._onDidChangeComments.fire();
-            vscode.window.showInformationMessage('✅ 同步完成');
         } catch (error) {
-            console.error('Full sync failed:', error);
-            vscode.window.showErrorMessage(`同步失败: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            console.error('Manual sync failed:', error);
             throw error;
         }
     }
 
     /**
-     * 获取同步状态
-     */
-    async getSyncStatus(): Promise<string> {
-        return await this.syncManager.getSyncStatus();
-    }
-
-    /**
-     * 显示同步方法选择器
-     */
-    async showSyncMethodPicker(): Promise<void> {
-        await this.syncManager.showSyncMethodPicker();
-    }
-
-    /**
-     * 设置同步方法
-     */
-    async setSyncMethod(method: SyncMethod): Promise<void> {
-        await this.syncManager.setSyncMethod(method);
-        // 重新加载评论以应用新的同步策略
-        await this.loadComments();
-        this._onDidChangeComments.fire();
-    }
-
-    /**
-     * 获取当前同步方法
-     */
-    getCurrentSyncMethod(): SyncMethod {
-        return this.syncManager.getCurrentSyncMethod();
-    }
-
-    // ================== Git 特定方法（向后兼容） ==================
-
-    /**
-     * 手动同步到Git（向后兼容）
-     */
-    async syncToGit(): Promise<void> {
-        if (this.syncManager.getCurrentSyncMethod() !== SyncMethod.Git) {
-            await this.syncManager.setSyncMethod(SyncMethod.Git);
-        }
-        await this.performFullSync();
-    }
-
-    /**
-     * 从Git加载评论（向后兼容）
+     * 从Git加载评论
      */
     async loadFromGit(): Promise<void> {
         try {
-            const gitOps = await this.syncManager.gitSpecificOperations();
-            const gitComments = await gitOps.loadFromFile();
-            
+            const gitComments = await this.gitSyncStrategy.loadCommentsFromFile();
             if (gitComments.length > 0) {
-                const mergedComments = this.syncManager.mergeComments(this.comments, gitComments);
+                const mergedComments = this.gitSyncStrategy.mergeComments(this.comments, gitComments);
                 this.comments = mergedComments;
                 await this.saveComments();
                 this._onDidChangeComments.fire();
-                vscode.window.showInformationMessage(`📥 从Git加载了 ${gitComments.length} 条评论`);
-            } else {
-                vscode.window.showInformationMessage('📥 Git中没有评论文件');
             }
         } catch (error) {
             console.error('Load from Git failed:', error);
-            vscode.window.showErrorMessage(`从Git加载失败: ${error instanceof Error ? error.message : 'Unknown error'}`);
             throw error;
         }
     }
 
     /**
-     * 启用自动同步（向后兼容）
+     * 启用自动同步
      */
     async enableAutoSync(): Promise<void> {
-        try {
-            const gitOps = await this.syncManager.gitSpecificOperations();
-            await gitOps.setupAutoSync();
-        } catch (error) {
-            console.error('Enable auto sync failed:', error);
-            vscode.window.showErrorMessage(`启用自动同步失败: ${error instanceof Error ? error.message : 'Unknown error'}`);
-            throw error;
-        }
+        await this.gitSyncStrategy.setupAutoSync();
     }
 
     /**
-     * 获取Git同步状态（向后兼容）
+     * 获取Git同步状态
      */
     async getGitSyncStatus(): Promise<string> {
-        try {
-            const gitOps = await this.syncManager.gitSpecificOperations();
-            return await gitOps.getGitStatus();
-        } catch (error) {
-            return 'Git not available';
-        }
+        return await this.gitSyncStrategy.getGitStatus();
     }
 }

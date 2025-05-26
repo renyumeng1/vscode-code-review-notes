@@ -2,6 +2,44 @@
 
 All notable changes to the "code-review-notes" extension will be documented in this file.
 
+## [0.1.0] - 2025-05-26
+
+### 🚀 Major Feature Release: Flexible Synchronization System
+
+### Added
+- **🔄 Flexible Sync System**: Complete rewrite of synchronization architecture using strategy pattern
+  - **Local Sync Strategy**: Fast, reliable local-only storage (default)
+  - **Git Sync Strategy**: Team collaboration through Git repository synchronization  
+  - **Server Sync Strategy**: Placeholder for future real-time server synchronization
+- **🎮 Sync Method Picker**: Interactive UI to choose and switch between sync methods
+- **⚙️ Advanced Configuration Options**:
+  - `codeReviewNotes.syncMethod`: Choose sync method (local/git/server)
+  - `codeReviewNotes.serverUrl`: Server URL for future server sync
+  - `codeReviewNotes.serverAuthToken`: Authentication token for server sync
+  - `codeReviewNotes.enableRealTimeSync`: Enable real-time synchronization
+- **📝 New Commands**:
+  - "Choose Sync Method" - Interactive sync method selection
+  - "Sync Now" - Manual full synchronization
+  - "Get Sync Status" - View current sync status
+
+### Enhanced
+- **🏗️ Strategy Pattern Architecture**: Extensible design for easy addition of new sync methods
+- **🔧 Unified Sync Manager**: Central coordination of all synchronization strategies
+- **🔄 Seamless Strategy Switching**: Change sync methods without data loss
+- **📊 Sync Status Monitoring**: Real-time sync status and health indicators
+- **🛡️ Backward Compatibility**: All existing Git commands preserved for smooth upgrades
+
+### Technical Improvements
+- **Type Safety**: Complete TypeScript type definitions for all sync components
+- **Error Handling**: Robust error handling and recovery mechanisms
+- **Modular Design**: Clean separation of concerns and extensible interfaces
+- **Configuration Management**: Persistent configuration with workspace-level settings
+
+### Future Ready
+- **🌐 Server Sync Foundation**: Ready for Overleaf-style real-time collaboration
+- **👥 Team Features**: Prepared for user management and real-time presence
+- **🔗 Integration Ready**: Extensible for GitHub, Azure DevOps, and other platforms
+
 ## [0.0.2] - 2025-05-26
 
 ### Added

@@ -1,20 +1,30 @@
 # 🔍 Code Review Notes - VS Code Extension
 
-一个强大的VS Code代码评论扩展，提供类似Overleaf的评论体验，支持多用户协作、解决者信息追踪、用户特定颜色编码和完整的评论生命周期管理。
+一个强大的VS Code代码评论扩展，提供类似Overleaf的评论体验，支持多用户协作、灵活同步系统、用户特定颜色编码和完整的评论生命周期管理。
 
 ## ✨ 核心特性
 
-### 🚀 **NEW** 解决者信息追踪
+### 🚀 **NEW** 灵活同步系统 v0.1.0
 
-- 📝 **记录解决者**: 自动记录谁解决了每个评论
-- ⏰ **解决时间**: 精确记录评论被解决的时间戳
-- 👤 **自定义用户名**: 设置个人用户名，替代默认的"User"
-- 💾 **持久化存储**: 解决者信息永久保存
+- 🔄 **多种同步策略**: 本地存储 / Git同步 / 服务器同步（即将推出）
+- 🎮 **交互式选择器**: 一键切换同步方法，无缝数据迁移
+- ⚙️ **策略模式架构**: 可扩展设计，轻松添加新的同步方式
+- 🛡️ **向后兼容**: 保留所有现有功能，平滑升级体验
+- 📊 **实时状态监控**: 同步状态和健康指标显示
+
+#### 同步方法详解
+
+| 同步方法 | 适用场景 | 特点 |
+|---------|---------|------|
+| 🏠 **本地存储** | 个人使用 | 快速、可靠、无需外部依赖 |
+| 🔗 **Git同步** | 团队协作 | 通过Git仓库同步，支持分支和合并 |
+| 🌐 **服务器同步** | 实时协作 | 类似Overleaf，实时更新（开发中） |
 
 ### 🎨 多用户协作
 
 - 🌈 **用户特定颜色**: 8种预设颜色，自动为不同用户分配
 - 💬 **评论线程**: 支持评论回复，构建完整讨论
+- 👤 **解决者信息追踪**: 自动记录谁解决了评论及解决时间
 - 👥 **多用户场景**: 完整支持团队代码评审工作流
 
 ### 🖥️ 界面体验
@@ -32,25 +42,47 @@
 
 ## 🚀 快速开始
 
-### 1. 设置用户名
+### 1. 选择同步方法
+
+```
+Ctrl+Shift+P → "Choose Sync Method" → 选择适合的同步策略
+```
+
+- **本地存储**: 默认选项，适合个人使用
+- **Git同步**: 适合团队协作，需要Git仓库
+- **服务器同步**: 即将推出的实时协作功能
+
+### 2. 设置用户名
 
 ```
 Ctrl+Shift+P → "Set Username" → 输入您的用户名
 ```
 
-### 2. 添加评论
+### 3. 添加评论
 
 ```
 选择代码文本 → 右键 → "Add Comment" 或按 Ctrl+Shift+C
 ```
 
-### 3. 体验多用户功能
+### 4. 体验同步功能
 
 ```
-Ctrl+Shift+P → "Create Test Comments" → 查看多用户演示
+Ctrl+Shift+P → "Sync Now" → 立即同步评论
+Ctrl+Shift+P → "Get Sync Status" → 查看同步状态
 ```
 
 ## 📋 功能详解
+
+### 同步系统操作
+
+| 操作 | 命令 | 说明 |
+|------|------|------|
+| **选择同步方法** | "Choose Sync Method" | 交互式选择器，支持实时切换 |
+| **立即同步** | "Sync Now" | 手动触发完整同步 |
+| **查看状态** | "Get Sync Status" | 显示当前同步方法和状态 |
+| **Git同步** | "Sync Comments to Git" | 向后兼容的Git同步命令 |
+| **Git加载** | "Load Comments from Git" | 从Git仓库加载评论 |
+| **自动同步** | "Enable Auto Sync" | 启用Git自动同步 |
 
 ### 评论操作
 
@@ -121,10 +153,63 @@ Ctrl+Shift+P → "Create Test Comments" → 查看多用户演示
 ```json
 {
   "codeReviewNotes.defaultAuthor": "YourName",
+  "codeReviewNotes.syncMethod": "local",
+  "codeReviewNotes.serverUrl": "http://localhost:3000",
+  "codeReviewNotes.serverAuthToken": "your-token",
+  "codeReviewNotes.enableRealTimeSync": false,
   "codeReviewNotes.showResolvedCommentHighlights": true,
   "codeReviewNotes.unresolvedCommentColor": "#ff9500",
   "codeReviewNotes.resolvedCommentColor": "#30d158"
 }
+```
+
+### 新增配置项说明
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `syncMethod` | string | "local" | 同步方法: local/git/server |
+| `serverUrl` | string | "" | 服务器同步URL地址 |
+| `serverAuthToken` | string | "" | 服务器同步认证令牌 |
+| `enableRealTimeSync` | boolean | false | 启用实时同步（需服务器支持） |
+
+## 🏗️ 技术架构
+
+### 策略模式设计
+
+```typescript
+// 抽象同步策略
+abstract class SyncStrategy {
+    abstract getSyncMethod(): SyncMethod;
+    abstract isSupported(): Promise<boolean>;
+    abstract saveComments(comments: Comment[]): Promise<SyncResult>;
+    abstract loadComments(): Promise<Comment[]>;
+    abstract performFullSync(localComments: Comment[]): Promise<Comment[]>;
+}
+
+// 具体策略实现
+class LocalSyncStrategy extends SyncStrategy { ... }
+class GitSyncStrategy extends SyncStrategy { ... }
+class ServerSyncStrategy extends SyncStrategy { ... }
+
+// 统一管理器
+class SyncManager {
+    async setSyncMethod(method: SyncMethod): Promise<void>
+    async showSyncMethodPicker(): Promise<void>
+    getCurrentSyncMethod(): SyncMethod
+}
+```
+
+### 文件结构
+
+```
+src/
+├── syncStrategy.ts          # 抽象基类和接口
+├── localSyncStrategy.ts     # 本地同步实现
+├── gitSyncService.ts        # Git同步实现
+├── serverSyncStrategy.ts    # 服务器同步占位
+├── syncManager.ts           # 同步管理器
+├── commentService.ts        # 评论服务（已重构）
+└── extension.ts             # 扩展入口（新增命令）
 ```
 
 ## 🔧 开发调试
@@ -225,24 +310,92 @@ A: 可在设置中自定义颜色，或切换VS Code主题
 
 ## 📊 版本历史
 
-### v0.0.1 (当前版本)
+### v0.1.0 (当前版本) - 2025年5月26日
+
+🚀 **重大功能发布: 灵活同步系统**
+
+- ✅ 策略模式架构重写
+- ✅ 本地/Git/服务器三种同步策略
+- ✅ 交互式同步方法选择器  
+- ✅ 向后兼容所有现有功能
+- ✅ 新增6个同步相关命令
+- ✅ 完整的配置选项支持
+
+### v0.0.2 - 2025年5月26日
+
+- ✅ 用户特定颜色系统
+- ✅ 解决者信息追踪
+- ✅ 悬浮提示优化
+- ✅ 测试评论命令
+
+### v0.0.1 - 2025年5月26日
 
 - ✅ 基础评论功能
-- ✅ 多用户颜色编码
+- ✅ 双树视图界面
 - ✅ 评论线程和回复
-- ✅ 解决/未解决状态管理
-- 🆕 **解决者信息追踪**
-- 🆕 **自定义用户名设置**
-- 🆕 **增强的界面显示**
+- ✅ 状态管理和高亮
 
 ## 🔮 路线图
 
-- [ ] 导出评论报告（PDF/Excel）
-- [ ] Git集成和提交关联
-- [ ] 评论模板和快速插入
-- [ ] 团队权限管理
-- [ ] 云端同步功能
-- [ ] 代码审查工作流集成
+### 即将推出 (v0.2.0)
+
+- [ ] 🌐 **服务器同步实现**: WebSocket实时通信
+- [ ] 👥 **团队功能**: 用户管理和在线状态
+- [ ] 🔔 **通知系统**: 评论更新提醒
+
+### 未来版本
+
+- [ ] 📊 **分析报告**: 导出评论报告（PDF/Excel）
+- [ ] 🔗 **平台集成**: GitHub/Azure DevOps集成
+- [ ] 🎯 **工作流**: 代码审查工作流自动化
+- [ ] 📱 **移动支持**: VS Code移动版适配
+
+## 🧪 测试验证
+
+### 同步系统测试 ✅
+
+```bash
+# 运行集成测试
+node integration_test.js
+```
+
+测试覆盖：
+- ✅ 所有文件正确编译
+- ✅ 命令正确注册  
+- ✅ 配置项正确设置
+- ✅ 策略切换正常工作
+- ✅ 向后兼容性保持
+
+### 功能测试建议
+
+1. **基础功能**: 创建→回复→解决评论
+2. **同步切换**: 本地↔Git↔服务器策略切换
+3. **多用户协作**: 不同用户颜色和解决者信息
+4. **Git集成**: 分支同步和冲突处理
+
+## 🐛 故障排除
+
+### 同步相关问题
+
+**Q: 如何切换同步方法？**
+A: `Ctrl+Shift+P` → "Choose Sync Method" → 选择新的同步策略
+
+**Q: Git同步失败？**
+A: 确保当前工作区是Git仓库，并且有适当的读写权限
+
+**Q: 服务器同步不可用？**
+A: 服务器同步功能当前为占位实现，将在v0.2.0版本中完整实现
+
+**Q: 数据会丢失吗？**
+A: 切换同步方法时会自动迁移数据，建议切换前手动同步一次
+
+### 通用问题
+
+**Q: 扩展没有激活？**
+A: 检查VS Code版本（需要1.100.0+），重新安装扩展
+
+**Q: 命令找不到？**
+A: 重新加载窗口 (`Ctrl+Shift+P` → "Reload Window")
 
 ## 📄 许可证
 
@@ -261,7 +414,10 @@ MIT License
 ---
 
 **开发者**: GitHub Copilot  
-**项目状态**: ✅ 功能完整，可用于生产环境  
+**项目状态**: ✅ 生产就绪，同步系统架构完整  
 **最后更新**: 2025年5月26日
 
-**🚀 立即开始**: 按`F5`启动扩展开发环境，使用`resolver-info-test.js`文件进行功能测试！
+**🚀 立即开始**: 
+1. 按 `F5` 启动扩展开发环境
+2. `Ctrl+Shift+P` → "Choose Sync Method" 选择同步策略
+3. 开始体验强大的协作功能！

@@ -1,14 +1,44 @@
 {
   "name": "code-review-notes",
   "displayName": "Code Review Notes",
-  "description": "A VS Code extension for adding, viewing, and managing code review comments similar to Overleaf",
-  "version": "0.0.1",
+  "description": "A powerful VS Code extension for code review with flexible sync system, multi-user collaboration, resolver tracking, and user-specific color coding",
+  "version": "0.1.0",
+  "publisher": "renyumeng",
+  "author": {
+    "name": "renyumeng",
+    "email": "renyumeng123@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/renyumeng1/vscode-code-review-notes.git"
+  },
+  "bugs": {
+    "url": "https://github.com/renyumeng1/vscode-code-review-notes/issues"
+  },
+  "homepage": "https://github.com/renyumeng1/vscode-code-review-notes#readme",
+  "keywords": [
+    "code review",
+    "comments",
+    "collaboration",
+    "annotation",
+    "overleaf",
+    "review notes",
+    "multi-user",
+    "resolver tracking"
+  ],
   "engines": {
     "vscode": "^1.100.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Notebooks",
+    "Debuggers"
   ],
+  "galleryBanner": {
+    "color": "#0078d4",
+    "theme": "dark"
+  },
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -87,6 +117,42 @@
         "title": "Set Username",
         "category": "Code Review Notes",
         "icon": "$(person)"
+      },
+      {
+        "command": "code-review-notes.syncComments",
+        "title": "Sync Comments to Git",
+        "category": "Code Review Notes",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "code-review-notes.loadCommentsFromGit",
+        "title": "Load Comments from Git",
+        "category": "Code Review Notes",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "code-review-notes.enableAutoSync",
+        "title": "Enable Auto Sync",
+        "category": "Code Review Notes",
+        "icon": "$(settings-sync-view-icon)"
+      },
+      {
+        "command": "code-review-notes.showSyncMethodPicker",
+        "title": "Choose Sync Method",
+        "category": "Code Review Notes",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "code-review-notes.performFullSync",
+        "title": "Sync Now",
+        "category": "Code Review Notes",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "code-review-notes.getSyncStatus",
+        "title": "Get Sync Status",
+        "category": "Code Review Notes",
+        "icon": "$(info)"
       }
     ],
     "views": {
@@ -138,6 +204,26 @@
           "command": "code-review-notes.createTestComments",
           "when": "view == codeReviewNotes",
           "group": "navigation"
+        },
+        {
+          "command": "code-review-notes.syncComments",
+          "when": "view == codeReviewNotes",
+          "group": "navigation"
+        },
+        {
+          "command": "code-review-notes.loadCommentsFromGit",
+          "when": "view == codeReviewNotes",
+          "group": "navigation"
+        },
+        {
+          "command": "code-review-notes.showSyncMethodPicker",
+          "when": "view == codeReviewNotes",
+          "group": "sync@1"
+        },
+        {
+          "command": "code-review-notes.performFullSync",
+          "when": "view == codeReviewNotes",
+          "group": "sync@2"
         },
         {
           "command": "code-review-notes.showAllComments",
@@ -203,6 +289,42 @@
           "type": "string",
           "default": "rgba(40, 167, 69, 0.12)",
           "description": "Background color for resolved comment highlights"
+        },
+        "codeReviewNotes.gitSyncEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic Git synchronization of comments"
+        },
+        "codeReviewNotes.gitSyncBranch": {
+          "type": "string",
+          "default": "main",
+          "description": "Git branch to use for comment synchronization"
+        },
+        "codeReviewNotes.autoSyncOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically sync comments when saving files"
+        },
+        "codeReviewNotes.syncMethod": {
+          "type": "string",
+          "enum": ["local", "git", "server"],
+          "default": "local",
+          "description": "Synchronization method: local (workspace only), git (Git repository), or server (remote server)"
+        },
+        "codeReviewNotes.serverUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Server URL for server-based synchronization (e.g., http://localhost:3000)"
+        },
+        "codeReviewNotes.serverAuthToken": {
+          "type": "string",
+          "default": "",
+          "description": "Authentication token for server synchronization"
+        },
+        "codeReviewNotes.enableRealTimeSync": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable real-time synchronization for server-based sync (requires server support)"
         }
       }
     }
