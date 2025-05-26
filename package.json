@@ -1,0 +1,233 @@
+{
+  "name": "code-review-notes",
+  "displayName": "Code Review Notes",
+  "description": "A VS Code extension for adding, viewing, and managing code review comments similar to Overleaf",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "code-review-notes.addComment",
+        "title": "Add Comment",
+        "category": "Code Review Notes"
+      },
+      {
+        "command": "code-review-notes.replyToComment",
+        "title": "Reply to Comment",
+        "category": "Code Review Notes"
+      },
+      {
+        "command": "code-review-notes.resolveComment",
+        "title": "Resolve Comment",
+        "category": "Code Review Notes"
+      },
+      {
+        "command": "code-review-notes.unresolveComment",
+        "title": "Unresolve Comment",
+        "category": "Code Review Notes"
+      },
+      {
+        "command": "code-review-notes.refreshComments",
+        "title": "Refresh Comments",
+        "category": "Code Review Notes",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "code-review-notes.goToComment",
+        "title": "Go to Comment",
+        "category": "Code Review Notes"
+      },
+      {
+        "command": "code-review-notes.showAllComments",
+        "title": "Show All Comments",
+        "category": "Code Review Notes",
+        "icon": "$(list-unordered)"
+      },
+      {
+        "command": "code-review-notes.showResolvedComments",
+        "title": "Show Resolved Comments",
+        "category": "Code Review Notes",
+        "icon": "$(check)"
+      },
+      {
+        "command": "code-review-notes.showUnresolvedComments",
+        "title": "Show Unresolved Comments",
+        "category": "Code Review Notes",
+        "icon": "$(issues)"
+      },
+      {
+        "command": "code-review-notes.toggleCommentHighlights",
+        "title": "Toggle Comment Highlights",
+        "category": "Code Review Notes",
+        "icon": "$(highlight)"
+      },
+      {
+        "command": "code-review-notes.toggleResolvedHighlights",
+        "title": "Toggle Resolved Comment Highlights",
+        "category": "Code Review Notes",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "code-review-notes.createTestComments",
+        "title": "Create Test Comments (for Demo)",
+        "category": "Code Review Notes",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "code-review-notes.setUsername",
+        "title": "Set Username",
+        "category": "Code Review Notes",
+        "icon": "$(person)"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "codeReviewNotes",
+          "name": "Code Review Notes",
+          "when": "workspaceFolderCount > 0"
+        },
+        {
+          "id": "allCodeReviewNotes",
+          "name": "All Comments",
+          "when": "workspaceFolderCount > 0"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "codeReviewNotes",
+        "contents": "No comments found in the current file.\n[Add Comment](command:code-review-notes.addComment)",
+        "when": "workspaceFolderCount > 0"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "code-review-notes.addComment",
+          "when": "editorHasSelection",
+          "group": "codeReview"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "code-review-notes.refreshComments",
+          "when": "view == codeReviewNotes",
+          "group": "navigation"
+        },
+        {
+          "command": "code-review-notes.toggleCommentHighlights",
+          "when": "view == codeReviewNotes",
+          "group": "navigation"
+        },
+        {
+          "command": "code-review-notes.toggleResolvedHighlights",
+          "when": "view == codeReviewNotes",
+          "group": "navigation"
+        },
+        {
+          "command": "code-review-notes.createTestComments",
+          "when": "view == codeReviewNotes",
+          "group": "navigation"
+        },
+        {
+          "command": "code-review-notes.showAllComments",
+          "when": "view == allCodeReviewNotes",
+          "group": "navigation@1"
+        },
+        {
+          "command": "code-review-notes.showResolvedComments",
+          "when": "view == allCodeReviewNotes",
+          "group": "navigation@2"
+        },
+        {
+          "command": "code-review-notes.showUnresolvedComments",
+          "when": "view == allCodeReviewNotes",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "code-review-notes.replyToComment",
+          "when": "view == codeReviewNotes && viewItem == comment",
+          "group": "inline"
+        },
+        {
+          "command": "code-review-notes.resolveComment",
+          "when": "view == codeReviewNotes && viewItem == comment",
+          "group": "inline"
+        },
+        {
+          "command": "code-review-notes.unresolveComment",
+          "when": "view == codeReviewNotes && viewItem == resolvedComment",
+          "group": "inline"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "code-review-notes.addComment",
+        "key": "ctrl+shift+c",
+        "mac": "cmd+shift+c",
+        "when": "editorTextFocus && editorHasSelection"
+      }
+    ],
+    "configuration": {
+      "title": "Code Review Notes",
+      "properties": {
+        "codeReviewNotes.defaultAuthor": {
+          "type": "string",
+          "default": "User",
+          "description": "Default author name for comments and replies"
+        },
+        "codeReviewNotes.showResolvedCommentHighlights": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to show highlights for resolved comments"
+        },
+        "codeReviewNotes.unresolvedCommentColor": {
+          "type": "string",
+          "default": "rgba(255, 193, 7, 0.15)",
+          "description": "Background color for unresolved comment highlights"
+        },
+        "codeReviewNotes.resolvedCommentColor": {
+          "type": "string",
+          "default": "rgba(40, 167, 69, 0.12)",
+          "description": "Background color for resolved comment highlights"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/uuid": "^10.0.0",
+    "@types/vscode": "^1.100.0",
+    "@typescript-eslint/eslint-plugin": "^8.31.1",
+    "@typescript-eslint/parser": "^8.31.1",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.25.1",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "uuid": "^11.1.0"
+  }
+}
