@@ -147,12 +147,23 @@
         "title": "Sync Now",
         "category": "Code Review Notes",
         "icon": "$(sync)"
-      },
-      {
+      },      {
         "command": "code-review-notes.getSyncStatus",
         "title": "Get Sync Status",
         "category": "Code Review Notes",
         "icon": "$(info)"
+      },
+      {
+        "command": "code-review-notes.deleteComment",
+        "title": "Delete Comment",
+        "category": "Code Review Notes",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "code-review-notes.addCommentToLine",
+        "title": "Add Comment to Line",
+        "category": "Code Review Notes",
+        "icon": "$(comment-add)"
       }
     ],
     "views": {
@@ -240,8 +251,7 @@
           "when": "view == allCodeReviewNotes",
           "group": "navigation@3"
         }
-      ],
-      "view/item/context": [
+      ],      "view/item/context": [
         {
           "command": "code-review-notes.replyToComment",
           "when": "view == codeReviewNotes && viewItem == comment",
@@ -253,8 +263,43 @@
           "group": "inline"
         },
         {
+          "command": "code-review-notes.deleteComment",
+          "when": "view == codeReviewNotes && viewItem == comment",
+          "group": "inline"
+        },
+        {
           "command": "code-review-notes.unresolveComment",
           "when": "view == codeReviewNotes && viewItem == resolvedComment",
+          "group": "inline"
+        },
+        {
+          "command": "code-review-notes.deleteComment",
+          "when": "view == codeReviewNotes && viewItem == resolvedComment",
+          "group": "inline"
+        },
+        {
+          "command": "code-review-notes.replyToComment",
+          "when": "view == allCodeReviewNotes && viewItem == comment",
+          "group": "inline"
+        },
+        {
+          "command": "code-review-notes.resolveComment",
+          "when": "view == allCodeReviewNotes && viewItem == comment",
+          "group": "inline"
+        },
+        {
+          "command": "code-review-notes.deleteComment",
+          "when": "view == allCodeReviewNotes && viewItem == comment",
+          "group": "inline"
+        },
+        {
+          "command": "code-review-notes.unresolveComment",
+          "when": "view == allCodeReviewNotes && viewItem == resolvedComment",
+          "group": "inline"
+        },
+        {
+          "command": "code-review-notes.deleteComment",
+          "when": "view == allCodeReviewNotes && viewItem == resolvedComment",
           "group": "inline"
         }
       ]
@@ -325,6 +370,13 @@
           "type": "boolean",
           "default": false,
           "description": "Enable real-time synchronization for server-based sync (requires server support)"
+,
+        "codeReview.notificationLevel": {
+          "type": "string",
+          "enum": ["none", "minimal", "verbose"],
+          "default": "minimal",
+          "description": "Controls the level of notifications displayed. 'none': no notifications, 'minimal': only important/error notifications, 'verbose': all notifications."
+        }
         }
       }
     }

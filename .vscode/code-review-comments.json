@@ -1,0 +1,171 @@
+{
+  "version": "1.0.0",
+  "generatedBy": "Code Review Notes Extension",
+  "lastUpdated": "2025-05-27T04:58:34.961Z",
+  "syncedBy": "Amamiyaren",
+  "syncMethod": "git",
+  "comments": [
+    {
+      "id": "fec4153f-6934-451f-a1da-380d42c67824",
+      "documentUri": "file:///e%3A/Graduate/code/VSCode%20Reviewer%20Tools/package.json",
+      "text": "测试comments",
+      "author": "Alice",
+      "timestamp": 1748263217663,
+      "resolved": true,
+      "replies": [
+        {
+          "id": "36f93bc3-50a4-4cbc-919e-2dd07a23509a",
+          "parentId": "fec4153f-6934-451f-a1da-380d42c67824",
+          "author": "Amamiyaren",
+          "text": "测试",
+          "timestamp": 1748265651792
+        }
+      ],
+      "resolvedBy": "Amamiyaren",
+      "resolvedAt": 1748265870197,
+      "anchor": {
+        "originalRange": {
+          "startLine": 18,
+          "startCharacter": 1,
+          "endLine": 18,
+          "endCharacter": 78
+        },
+        "beforeContext": "    \"url\": \"https://github.com/renyumeng1/vscode-code-review-notes/issues\"\n  },",
+        "afterContext": "  \"keywords\": [\n    \"code review\",",
+        "codeSnippet": " \"homepage\": \"https://github.com/renyumeng1/vscode-code-review-notes#readme\",",
+        "status": "valid",
+        "lastValidatedAt": 1748321825638
+      }
+    },
+    {
+      "id": "9088edea-b60c-4dd6-9c6f-3f9c8871d05b",
+      "documentUri": "file:///e%3A/Graduate/code/VSCode%20Reviewer%20Tools/package.json",
+      "text": "测试1",
+      "author": "Alice",
+      "timestamp": 1748265562611,
+      "resolved": true,
+      "replies": [],
+      "resolvedBy": "Amamiyaren",
+      "resolvedAt": 1748265871013,
+      "anchor": {
+        "originalRange": {
+          "startLine": 19,
+          "startCharacter": 2,
+          "endLine": 28,
+          "endCharacter": 4
+        },
+        "beforeContext": "  },\n  \"homepage\": \"https://github.com/renyumeng1/vscode-code-review-notes#readme\",",
+        "afterContext": "  \"engines\": {\n    \"vscode\": \"^1.90.0\"",
+        "codeSnippet": "\"keywords\": [\n    \"code review\",\n    \"comments\",\n    \"collaboration\",\n    \"annotation\",\n    \"overleaf\",\n    \"review notes\",\n    \"multi-user\",\n    \"resolver tracking\"\n  ],",
+        "status": "valid",
+        "lastValidatedAt": 1748321825638
+      }
+    },
+    {
+      "id": "d98d01b6-57d3-4056-9562-b63c6382281a",
+      "documentUri": "file:///e%3A/Graduate/code/VSCode%20Reviewer%20Tools/package.json",
+      "text": "amamiyaren测试",
+      "author": "Amamiyaren",
+      "timestamp": 1748265676432,
+      "resolved": true,
+      "replies": [],
+      "resolvedBy": "Amamiyaren",
+      "resolvedAt": 1748265871782,
+      "anchor": {
+        "originalRange": {
+          "startLine": 47,
+          "startCharacter": 4,
+          "endLine": 51,
+          "endCharacter": 8
+        },
+        "beforeContext": "  \"contributes\": {\n    \"commands\": [",
+        "afterContext": "      {\n        \"command\": \"code-review-notes.replyToComment\",",
+        "codeSnippet": "  {\n        \"command\": \"code-review-notes.addComment\",\n        \"title\": \"Add Comment\",\n        \"category\": \"Code Review Notes\"\n      },",
+        "status": "valid",
+        "lastValidatedAt": 1748321825638
+      }
+    },
+    {
+      "id": "9cff7c0d-5f56-4681-b4a8-acbc53269312",
+      "documentUri": "file:///e%3A/Graduate/code/VSCode%20Reviewer%20Tools/package.json",
+      "text": "测试3",
+      "author": "Amamiyaren",
+      "timestamp": 1748265903022,
+      "resolved": true,
+      "replies": [],
+      "resolvedBy": "Amamiyaren",
+      "resolvedAt": 1748265910790,
+      "anchor": {
+        "originalRange": {
+          "startLine": 57,
+          "startCharacter": 6,
+          "endLine": 61,
+          "endCharacter": 8
+        },
+        "beforeContext": "        \"category\": \"Code Review Notes\"\n      },",
+        "afterContext": "      {\n        \"command\": \"code-review-notes.unresolveComment\",",
+        "codeSnippet": "{\n        \"command\": \"code-review-notes.resolveComment\",\n        \"title\": \"Resolve Comment\",\n        \"category\": \"Code Review Notes\"\n      },",
+        "status": "valid",
+        "lastValidatedAt": 1748321825638
+      }
+    },
+    {
+      "id": "7d829da3-6c9e-4b64-bc08-f00144ca3578",
+      "documentUri": "file:///e%3A/Graduate/code/VSCode%20Reviewer%20Tools/test.py",
+      "text": "这应该是20+21",
+      "author": "Amamiyaren",
+      "timestamp": 1748318982107,
+      "resolved": false,
+      "replies": [],
+      "anchor": {
+        "originalRange": {
+          "startLine": 13,
+          "startCharacter": 4,
+          "endLine": 13,
+          "endCharacter": 22
+        },
+        "beforeContext": "    print(plus(15,16))\r\n    print(plus(17,18))\r",
+        "afterContext": "    print(plus(21,22))",
+        "codeSnippet": "print(plus(19,20))",
+        "status": "moved",
+        "lastValidatedAt": 1748321914959,
+        "currentRange": {
+          "startLine": 20,
+          "startCharacter": 4,
+          "endLine": 20,
+          "endCharacter": 22
+        },
+        "confidence": 1
+      }
+    },
+    {
+      "id": "9d14368e-8427-4407-9d90-3e84f0ff30b5",
+      "documentUri": "file:///e%3A/Graduate/code/VSCode%20Reviewer%20Tools/test.py",
+      "anchor": {
+        "originalRange": {
+          "startLine": 24,
+          "startCharacter": 4,
+          "endLine": 24,
+          "endCharacter": 31
+        },
+        "beforeContext": "    \r\n    print(plus(21,22))\r",
+        "afterContext": "",
+        "codeSnippet": "print(\"==================\")",
+        "status": "deleted",
+        "lastValidatedAt": 1748321914960,
+        "currentRange": {
+          "startLine": 28,
+          "startCharacter": 4,
+          "endLine": 28,
+          "endCharacter": 31
+        },
+        "confidence": 1
+      },
+      "text": "之后",
+      "author": "Amamiyaren",
+      "timestamp": 1748321889785,
+      "resolved": false,
+      "replies": []
+    }
+  ]
+}

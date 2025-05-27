@@ -57,20 +57,23 @@ suite('SyncManager Test Suite', () => {
         // 测试切换回本地方法
         await syncManager.setSyncMethod(SyncMethod.Local);
         assert.strictEqual(syncManager.getCurrentSyncMethod(), SyncMethod.Local);
-    });
-
-    test('SyncManager save and load comments', async () => {
+    });    test('SyncManager save and load comments', async () => {
         const testComments = [
             {
                 id: 'test-1',
                 text: 'Test comment 1',
                 author: 'TestUser',
                 timestamp: Date.now(),
-                range: {
-                    startLine: 0,
-                    startCharacter: 0,
-                    endLine: 0,
-                    endCharacter: 10
+                anchor: {
+                    originalRange: {
+                        startLine: 0,
+                        startCharacter: 0,
+                        endLine: 0,
+                        endCharacter: 10
+                    },
+                    codeSnippet: 'test code',
+                    status: 'valid' as const,
+                    lastValidatedAt: Date.now()
                 },
                 documentUri: 'test://test.ts',
                 resolved: false,

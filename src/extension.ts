@@ -4,19 +4,21 @@ import { CommentTreeDataProvider, CommentTreeItem } from './commentTreeProvider'
 import { AllCommentsTreeDataProvider, CommentFilter } from './allCommentsTreeProvider';
 import { CommentHighlightManager } from './commentHighlightManager';
 import { UserColorManagerImpl } from './userColorManager';
-import { Comment, CommentRange, UserColorManager } from './types';
+import { InlineCommentUIManager } from './inlineCommentUIManager';
+import { Comment, CommentRange, UserColorManager, NotificationLevel } from './types';
 
 let commentService: CommentService;
 let treeDataProvider: CommentTreeDataProvider;
 let allCommentsTreeDataProvider: AllCommentsTreeDataProvider;
 let commentHighlightManager: CommentHighlightManager;
 let userColorManager: UserColorManager;
+let inlineCommentUIManager: InlineCommentUIManager;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Code Review Notes extension is now active!');
     
     // 显示激活消息
-    vscode.window.showInformationMessage('Code Review Notes 插件已激活！');
+    showNotification('Code Review Notes 插件已激活！', NotificationLevel.Verbose);
 
     // 初始化服务
     commentService = new CommentService(context);
@@ -24,6 +26,16 @@ export function activate(context: vscode.ExtensionContext) {
     treeDataProvider = new CommentTreeDataProvider(commentService);
     allCommentsTreeDataProvider = new AllCommentsTreeDataProvider(commentService);
     commentHighlightManager = new CommentHighlightManager(context, commentService, userColorManager);
+    inlineCommentUIManager = new InlineCommentUIManager(context, commentService);
+
+    // 设置CommentPositionTracker的静默验证回调
+    const positionTracker = (commentService as any).positionTracker;
+    if (positionTracker) {
+        positionTracker.onSilentValidationNeeded = async (document: vscode.TextDocument) => {
+            await commentService.validateAndUpdatePositions(document.uri.toString());
+            commentHighlightManager.updateHighlights(vscode.window.activeTextEditor!);
+        };
+    }
 
     // 创建树视图
     const treeView = vscode.window.createTreeView('codeReviewNotes', {
@@ -47,26 +59,63 @@ export function activate(context: vscode.ExtensionContext) {
         }),
 
         // 回复评论
-        vscode.commands.registerCommand('code-review-notes.replyToComment', async (item: CommentTreeItem) => {
-            if (item && item.comment) {
-                await replyToComment(item.comment.id);
+        vscode.commands.registerCommand('code-review-notes.replyToComment', async (itemOrCommentId: CommentTreeItem | string) => {
+            let commentId: string;
+            
+            if (typeof itemOrCommentId === 'string') {
+                // 直接传递 commentId
+                commentId = itemOrCommentId;
+            } else if (itemOrCommentId && itemOrCommentId.comment) {
+                // 从 TreeItem 获取 commentId
+                commentId = itemOrCommentId.comment.id;
+            } else {
+                showNotification('无效的评论参数', NotificationLevel.Minimal, true);
+                return;
             }
+            
+            await replyToComment(commentId);
         }),
 
         // 解决评论
-        vscode.commands.registerCommand('code-review-notes.resolveComment', async (item: CommentTreeItem) => {
-            if (item && item.comment) {
-                const currentUser = commentService.getCurrentUser();
-                commentService.resolveComment(item.comment.id, currentUser);
-                vscode.window.showInformationMessage(`评论已由 ${currentUser} 标记为已解决`);
+        vscode.commands.registerCommand('code-review-notes.resolveComment', async (itemOrCommentId: CommentTreeItem | string) => {
+            let commentId: string;
+            
+            if (typeof itemOrCommentId === 'string') {
+                commentId = itemOrCommentId;
+            } else if (itemOrCommentId && itemOrCommentId.comment) {
+                commentId = itemOrCommentId.comment.id;
+            } else {
+                showNotification('无效的评论参数', NotificationLevel.Minimal, true);
+                return;
+            }
+            
+            const currentUser = commentService.getCurrentUser();
+            const success = commentService.resolveComment(commentId, currentUser);
+            if (success) {
+                showNotification(`评论已由 ${currentUser} 标记为已解决`, NotificationLevel.Minimal);
+            } else {
+                showNotification('评论不存在', NotificationLevel.Minimal, true);
             }
         }),
 
         // 取消解决评论
-        vscode.commands.registerCommand('code-review-notes.unresolveComment', async (item: CommentTreeItem) => {
-            if (item && item.comment) {
-                commentService.unresolveComment(item.comment.id);
-                vscode.window.showInformationMessage('评论已标记为未解决');
+        vscode.commands.registerCommand('code-review-notes.unresolveComment', async (itemOrCommentId: CommentTreeItem | string) => {
+            let commentId: string;
+            
+            if (typeof itemOrCommentId === 'string') {
+                commentId = itemOrCommentId;
+            } else if (itemOrCommentId && itemOrCommentId.comment) {
+                commentId = itemOrCommentId.comment.id;
+            } else {
+                showNotification('无效的评论参数', NotificationLevel.Minimal, true);
+                return;
+            }
+            
+            const success = commentService.unresolveComment(commentId);
+            if (success) {
+                showNotification('评论已标记为未解决', NotificationLevel.Minimal);
+            } else {
+                showNotification('评论不存在', NotificationLevel.Minimal, true);
             }
         }),
 
@@ -84,21 +133,21 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('code-review-notes.showAllComments', () => {
             allCommentsTreeDataProvider.setFilter(CommentFilter.All);
             allCommentsTreeView.description = '显示所有评论';
-            vscode.window.showInformationMessage('显示所有评论');
+            showNotification('显示所有评论', NotificationLevel.Verbose);
         }),
 
         // 显示已解决的评论
         vscode.commands.registerCommand('code-review-notes.showResolvedComments', () => {
             allCommentsTreeDataProvider.setFilter(CommentFilter.Resolved);
             allCommentsTreeView.description = '显示已解决的评论';
-            vscode.window.showInformationMessage('显示已解决的评论');
+            showNotification('显示已解决的评论', NotificationLevel.Verbose);
         }),
 
         // 显示未解决的评论
         vscode.commands.registerCommand('code-review-notes.showUnresolvedComments', () => {
             allCommentsTreeDataProvider.setFilter(CommentFilter.Unresolved);
             allCommentsTreeView.description = '显示未解决的评论';
-            vscode.window.showInformationMessage('显示未解决的评论');
+            showNotification('显示未解决的评论', NotificationLevel.Verbose);
         }),
 
         // 切换评论高亮
@@ -120,7 +169,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('code-review-notes.createTestComments', async () => {
             const activeEditor = vscode.window.activeTextEditor;
             if (!activeEditor) {
-                vscode.window.showErrorMessage('请先打开一个文件');
+                showNotification('请先打开一个文件', NotificationLevel.Minimal, true);
                 return;
             }
 
@@ -165,18 +214,7 @@ export function activate(context: vscode.ExtensionContext) {
                         endCharacter: line.text.length
                     };
 
-                    const comment: Comment = {
-                        id: `test-${testComment.author}-${Date.now()}-${Math.random()}`,
-                        text: testComment.text,
-                        author: testComment.author,
-                        timestamp: Date.now(),
-                        range: range,
-                        documentUri: document.uri.toString(),
-                        resolved: testComment.resolved,
-                        replies: []
-                    };
-
-                    const addedComment = commentService.addComment(
+                    const addedComment = await commentService.addComment(
                         document.uri.toString(),
                         range,
                         testComment.text,
@@ -246,7 +284,74 @@ export function activate(context: vscode.ExtensionContext) {
             } catch (error) {
                 console.error('Enable auto sync command failed:', error);
             }
-        })
+        }),
+
+        // 删除评论
+        vscode.commands.registerCommand('code-review-notes.deleteComment', async (commentIdOrItem: string | CommentTreeItem) => {
+            let commentId: string;
+            
+            // 处理不同的调用方式
+            if (typeof commentIdOrItem === 'string') {
+                // 直接传递 commentId
+                commentId = commentIdOrItem;
+            } else if (commentIdOrItem && commentIdOrItem.comment) {
+                // 从 TreeItem 获取 commentId
+                commentId = commentIdOrItem.comment.id;
+            } else {
+                showNotification('无效的评论参数', NotificationLevel.Minimal, true);
+                return;
+            }
+            
+            const comment = commentService.getCommentById(commentId);
+            if (!comment) {
+                showNotification('评论不存在', NotificationLevel.Minimal, true);
+                return;
+            }
+            
+            const action = await vscode.window.showWarningMessage(
+                `确定要删除这条评论吗？\n"${comment.text.substring(0, 50)}..."`,
+                { modal: true },
+                '删除',
+                '取消'
+            );
+            
+            if (action === '删除') {
+                const success = await commentService.deleteComment(commentId);
+                if (success) {
+                    treeDataProvider.refresh();
+                    allCommentsTreeDataProvider.refresh();
+                    // 更新高亮
+                    const activeEditor = vscode.window.activeTextEditor;
+                    if (activeEditor) {
+                        commentHighlightManager.updateHighlights(activeEditor);
+                    }
+                }
+            }
+        }),
+
+        // 添加评论到指定行
+        vscode.commands.registerCommand('code-review-notes.addCommentToLine', async (uri: vscode.Uri, lineNumber: number, commentText?: string) => {
+            const editor = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === uri.toString());
+            if (!editor) {
+                vscode.window.showErrorMessage('找不到对应的编辑器');
+                return;
+            }
+            
+            // 选择整行
+            const line = editor.document.lineAt(lineNumber);
+            const range = new vscode.Range(lineNumber, 0, lineNumber, line.text.length);
+            editor.selection = new vscode.Selection(range.start, range.end);
+            
+            if (commentText) {
+                // 直接添加评论
+                await addCommentWithText(commentText);
+            } else {
+                // 使用内联输入框（类似Copilot体验）
+                await inlineCommentUIManager.showInlineCommentInput(editor, lineNumber);
+            }
+        }),
+
+        // ...existing code...
     ];
 
     // 监听活动编辑器变化
@@ -270,7 +375,7 @@ export function activate(context: vscode.ExtensionContext) {
 async function addComment(): Promise<void> {
     const activeEditor = vscode.window.activeTextEditor;
     if (!activeEditor) {
-        vscode.window.showErrorMessage('请先打开一个文件');
+        showNotification('请先打开一个文件', NotificationLevel.Minimal, true);
         return;
     }
 
@@ -364,9 +469,10 @@ async function goToComment(commentId: string): Promise<void> {
         const document = await vscode.workspace.openTextDocument(uri);
         const editor = await vscode.window.showTextDocument(document);
 
-        // 创建选择范围
-        const startPos = new vscode.Position(comment.range.startLine, comment.range.startCharacter);
-        const endPos = new vscode.Position(comment.range.endLine, comment.range.endCharacter);
+        // 使用锚点系统获取当前范围
+        const commentRange = commentService.getCommentRange(comment);
+        const startPos = new vscode.Position(commentRange.startLine, commentRange.startCharacter);
+        const endPos = new vscode.Position(commentRange.endLine, commentRange.endCharacter);
         const range = new vscode.Range(startPos, endPos);
 
         // 选择文本并滚动到视图
@@ -392,6 +498,79 @@ async function goToComment(commentId: string): Promise<void> {
     }
 }
 
+/**
+ * 使用预定义文本添加评论
+ */
+async function addCommentWithText(commentText: string): Promise<void> {
+    const activeEditor = vscode.window.activeTextEditor;
+    if (!activeEditor) {
+        showNotification('请先打开一个文件', NotificationLevel.Minimal, true);
+        return;
+    }
+
+    const selection = activeEditor.selection;
+    if (selection.isEmpty) {
+        vscode.window.showErrorMessage('请先选择要评论的文本');
+        return;
+    }
+
+    // 获取作者名称
+    const defaultAuthor = commentService.getCurrentUser();
+
+    // 创建评论范围
+    const range: CommentRange = {
+        startLine: selection.start.line,
+        startCharacter: selection.start.character,
+        endLine: selection.end.line,
+        endCharacter: selection.end.character
+    };
+
+    // 添加评论
+    const comment = await commentService.addComment(
+        activeEditor.document.uri.toString(),
+        range,
+        commentText.trim(),
+        defaultAuthor
+    );
+
+    // 刷新视图
+    treeDataProvider.refresh();
+    allCommentsTreeDataProvider.refresh();
+    
+    // 更新高亮
+    commentHighlightManager.updateHighlights(activeEditor);
+}
+
+/**
+ * 根据通知等级显示通知
+ * @param message 通知消息
+ * @param level 此通知的等级
+ * @param isError 是否为错误消息 (默认为 false)
+ */
+function showNotification(message: string, level: NotificationLevel, isError: boolean = false): void {
+    const config = vscode.workspace.getConfiguration('codeReview');
+    const configuredLevel = config.get<NotificationLevel>('notificationLevel') || NotificationLevel.Minimal;
+
+    if (configuredLevel === NotificationLevel.None) {
+        return; // 不显示任何通知
+    }
+
+    if (configuredLevel === NotificationLevel.Minimal) {
+        if (level === NotificationLevel.Minimal || isError) {
+            if (isError) {
+                vscode.window.showErrorMessage(message);
+            } else {
+                vscode.window.showInformationMessage(message);
+            }
+        }
+    } else if (configuredLevel === NotificationLevel.Verbose) {
+        if (isError) {
+            vscode.window.showErrorMessage(message);
+        } else {
+            vscode.window.showInformationMessage(message);
+        }
+    }
+}
 export function deactivate() {
     // 清理资源
 }

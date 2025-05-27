@@ -15,10 +15,8 @@ export class CommentTreeItem extends vscode.TreeItem {
         public readonly isReply: boolean = false
     ) {
         super(label, collapsibleState);
-        
-        if (comment && !isReply) {
+          if (comment && !isReply) {
             this.contextValue = comment.resolved ? 'resolvedComment' : 'comment';
-            this.description = this.getCommentDescription(comment);
             this.tooltip = this.getCommentTooltip(comment);
             this.iconPath = comment.resolved 
                 ? new vscode.ThemeIcon('check', new vscode.ThemeColor('testing.iconPassed'))
@@ -36,18 +34,7 @@ export class CommentTreeItem extends vscode.TreeItem {
             this.tooltip = this.getReplyTooltip(reply);
             this.iconPath = new vscode.ThemeIcon('arrow-right');
         }
-    }
-      private getCommentDescription(comment: Comment): string {
-        const fileUri = vscode.Uri.parse(comment.documentUri);
-        const fileName = path.basename(fileUri.fsPath);
-        const lineNumber = comment.range.startLine + 1;
-        let status = '';
-        if (comment.resolved) {
-            status = comment.resolvedBy ? ` (已解决 by ${comment.resolvedBy})` : ' (已解决)';
-        }
-        return `${fileName}:${lineNumber}${status}`;
-    }
-      private getCommentTooltip(comment: Comment): string {
+    }      private getCommentTooltip(comment: Comment): string {
         const date = new Date(comment.timestamp).toLocaleString();
         const repliesCount = comment.replies.length;
         const repliesText = repliesCount > 0 ? ` (${repliesCount} 个回复)` : '';
@@ -111,9 +98,7 @@ export class CommentTreeDataProvider implements vscode.TreeDataProvider<CommentT
             // 回复级别：没有子项
             return Promise.resolve([]);
         }
-    }
-
-    private async getCurrentFileComments(): Promise<CommentTreeItem[]> {
+    }    private async getCurrentFileComments(): Promise<CommentTreeItem[]> {
         const activeEditor = vscode.window.activeTextEditor;
         if (!activeEditor) {
             return [];
@@ -122,8 +107,12 @@ export class CommentTreeDataProvider implements vscode.TreeDataProvider<CommentT
         const documentUri = activeEditor.document.uri.toString();
         const comments = this.commentService.getCommentsForFile(documentUri);
         
-        // 按行号排序
-        comments.sort((a, b) => a.range.startLine - b.range.startLine);
+        // 按行号排序，使用锚点系统
+        comments.sort((a, b) => {
+            const rangeA = this.commentService.getCommentRange(a);
+            const rangeB = this.commentService.getCommentRange(b);
+            return rangeA.startLine - rangeB.startLine;
+        });
 
         return comments.map(comment => {
             const hasReplies = comment.replies.length > 0;
@@ -134,7 +123,18 @@ export class CommentTreeDataProvider implements vscode.TreeDataProvider<CommentT
             const truncatedText = this.truncateText(comment.text, 50);
             const label = `${truncatedText}`;
             
-            return new CommentTreeItem(label, collapsibleState, comment);
+            const treeItem = new CommentTreeItem(label, collapsibleState, comment);
+            // 使用当前位置更新描述
+            const range = this.commentService.getCommentRange(comment);
+            const fileName = path.basename(vscode.Uri.parse(comment.documentUri).fsPath);
+            const lineNumber = range.startLine + 1;
+            let status = '';
+            if (comment.resolved) {
+                status = comment.resolvedBy ? ` (已解决 by ${comment.resolvedBy})` : ' (已解决)';
+            }
+            treeItem.description = `${fileName}:${lineNumber}${status}`;
+            
+            return treeItem;
         });
     }
 

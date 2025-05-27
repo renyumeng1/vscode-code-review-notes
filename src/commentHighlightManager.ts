@@ -229,9 +229,7 @@ export class CommentHighlightManager {
         }
 
         return vscode.window.createTextEditorDecorationType(options);
-    }
-
-    /**
+    }    /**
      * 创建装饰选项
      */
     private createDecorations(comments: Comment[]): vscode.DecorationOptions[] {
@@ -239,8 +237,16 @@ export class CommentHighlightManager {
         
         comments.forEach(comment => {
             try {
-                const startPos = new vscode.Position(comment.range.startLine, comment.range.startCharacter);
-                const endPos = new vscode.Position(comment.range.endLine, comment.range.endCharacter);
+                // 使用锚点系统获取当前范围
+                const commentRange = this.commentService.getCommentRange(comment);
+                if (!commentRange) {
+                    console.warn('Could not get range for comment:', comment.id);
+                    return;
+                }
+
+                // 转换为 vscode.Range
+                const startPos = new vscode.Position(commentRange.startLine, commentRange.startCharacter);
+                const endPos = new vscode.Position(commentRange.endLine, commentRange.endCharacter);
                 const range = new vscode.Range(startPos, endPos);
 
                 const decoration: vscode.DecorationOptions = {

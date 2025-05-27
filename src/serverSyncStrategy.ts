@@ -74,9 +74,10 @@ export class ServerSyncStrategy extends SyncStrategy {
     async configureServer(): Promise<void> {
         const serverUrl = await vscode.window.showInputBox({
             prompt: '请输入服务器地址',
-            placeHolder: 'https://your-server.com',
-            validateInput: (value) => {
-                if (!value) return '服务器地址不能为空';
+            placeHolder: 'https://your-server.com',            validateInput: (value) => {
+                if (!value) {
+                    return '服务器地址不能为空';
+                }
                 try {
                     new URL(value);
                     return null;
@@ -86,7 +87,9 @@ export class ServerSyncStrategy extends SyncStrategy {
             }
         });
 
-        if (!serverUrl) return;
+        if (!serverUrl) {
+            return;
+        }
 
         const apiKey = await vscode.window.showInputBox({
             prompt: '请输入API密钥（可选）',

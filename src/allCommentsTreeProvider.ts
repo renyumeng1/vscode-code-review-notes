@@ -125,26 +125,39 @@ export class AllCommentsTreeDataProvider implements vscode.TreeDataProvider<vsco
         fileItems.sort((a, b) => a.label.localeCompare(b.label));
         
         return fileItems;
-    }
-
-    private async getFileComments(documentUri: string): Promise<vscode.TreeItem[]> {
+    }    private async getFileComments(documentUri: string): Promise<vscode.TreeItem[]> {
         const comments = this.commentService.getCommentsForFile(documentUri);
         const filteredComments = this.filterComments(comments);
         
-        // 按行号排序
-        filteredComments.sort((a, b) => a.range.startLine - b.range.startLine);
-
-        return filteredComments.map(comment => {
+        // 按行号排序，使用锚点系统
+        filteredComments.sort((a, b) => {
+            const rangeA = this.commentService.getCommentRange(a);
+            const rangeB = this.commentService.getCommentRange(b);
+            return rangeA.startLine - rangeB.startLine;
+        });        return filteredComments.map(comment => {
             const hasReplies = comment.replies.length > 0;
             const collapsibleState = hasReplies 
                 ? vscode.TreeItemCollapsibleState.Collapsed 
                 : vscode.TreeItemCollapsibleState.None;
                 
             const truncatedText = this.truncateText(comment.text, 60);
-            const lineNumber = comment.range.startLine + 1;
+            const range = this.commentService.getCommentRange(comment);
+            const lineNumber = range.startLine + 1;
             const label = `Line ${lineNumber}: ${truncatedText}`;
             
             const item = new CommentTreeItem(label, collapsibleState, comment);
+            // 设置描述
+            const date = new Date(comment.timestamp).toLocaleString('zh-CN', { 
+                month: 'short', 
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            let status = '';
+            if (comment.resolved) {
+                status = comment.resolvedBy ? ` (已解决 by ${comment.resolvedBy})` : ' (已解决)';
+            }
+            item.description = `${comment.author} - ${date}${status}`;
             return item;
         });
     }
@@ -204,10 +217,8 @@ export class CommentTreeItem extends vscode.TreeItem {
         public readonly isReply: boolean = false
     ) {
         super(label, collapsibleState);
-        
-        if (comment && !isReply) {
+          if (comment && !isReply) {
             this.contextValue = comment.resolved ? 'resolvedComment' : 'comment';
-            this.description = this.getCommentDescription(comment);
             this.tooltip = this.getCommentTooltip(comment);
             this.iconPath = comment.resolved 
                 ? new vscode.ThemeIcon('check', new vscode.ThemeColor('testing.iconPassed'))
@@ -225,22 +236,7 @@ export class CommentTreeItem extends vscode.TreeItem {
             this.tooltip = this.getReplyTooltip(reply);
             this.iconPath = new vscode.ThemeIcon('arrow-right');
         }
-    }
-      private getCommentDescription(comment: Comment): string {
-        const date = new Date(comment.timestamp).toLocaleString('zh-CN', { 
-            month: 'short', 
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-        let status = '';
-        if (comment.resolved) {
-            status = comment.resolvedBy ? ` (已解决 by ${comment.resolvedBy})` : ' (已解决)';
-        }
-        return `${comment.author} - ${date}${status}`;
-    }
-    
-    private getCommentTooltip(comment: Comment): string {
+    }    private getCommentTooltip(comment: Comment): string {
         const date = new Date(comment.timestamp).toLocaleString();
         const repliesCount = comment.replies.length;
         const repliesText = repliesCount > 0 ? ` (${repliesCount} 个回复)` : '';

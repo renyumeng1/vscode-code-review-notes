@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
-import { Comment, CommentReply, CommentRange, CommentData } from './types';
+import { Comment, CommentReply, CommentRange, CommentData, CommentAnchor, LegacyComment } from './types';
 import { v4 as uuidv4 } from 'uuid';
 import { SyncManager } from './syncManager';
 import { SyncMethod } from './syncStrategy';
+import { CommentPositionTracker } from './commentPositionTracker';
 
 /**
  * 评论服务类，负责管理评论数据的CRUD操作
@@ -14,17 +15,29 @@ export class CommentService {
     private comments: Comment[] = [];
     private context: vscode.ExtensionContext;
     private syncManager: SyncManager;
+    private positionTracker: CommentPositionTracker;
+    private documentChangeListener?: vscode.Disposable;
     private _onDidChangeComments = new vscode.EventEmitter<void>();
     
-    readonly onDidChangeComments = this._onDidChangeComments.event;
-
-    constructor(context: vscode.ExtensionContext) {
+    readonly onDidChangeComments = this._onDidChangeComments.event;    constructor(context: vscode.ExtensionContext) {
         this.context = context;
         this.syncManager = new SyncManager(context);
+        this.positionTracker = new CommentPositionTracker();
+        
+        // 设置位置追踪
+        this.setupPositionTracking();
+        
         // 异步加载评论
         this.loadComments().then(() => {
             this._onDidChangeComments.fire();
         });
+    }
+
+    /**
+     * 设置位置追踪
+     */
+    private setupPositionTracking(): void {
+        this.documentChangeListener = this.positionTracker.setupDocumentChangeListener(this);
     }
 
     /**
@@ -46,21 +59,27 @@ export class CommentService {
      */
     getCommentById(id: string): Comment | undefined {
         return this.comments.find(comment => comment.id === id);
-    }
-
-    /**
+    }    /**
      * 添加新评论
      */
-    addComment(
+    async addComment(
         documentUri: string,
         range: CommentRange,
         text: string,
         author: string = 'User'
-    ): Comment {
+    ): Promise<Comment> {
+        // 获取文档并创建智能锚点
+        const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(documentUri));
+        const vscodeRange = new vscode.Range(
+            range.startLine, range.startCharacter,
+            range.endLine, range.endCharacter
+        );
+        const anchor = await this.positionTracker.createAnchor(document, vscodeRange);
+
         const comment: Comment = {
             id: uuidv4(),
             documentUri,
-            range,
+            anchor,
             text,
             author,
             timestamp: Date.now(),
@@ -137,17 +156,67 @@ export class CommentService {
     /**
      * 删除评论
      */
-    deleteComment(commentId: string): boolean {
+    async deleteComment(commentId: string): Promise<boolean> {
         const index = this.comments.findIndex(comment => comment.id === commentId);
         if (index === -1) {
             return false;
         }
-
+        
+        const comment = this.comments[index];
         this.comments.splice(index, 1);
-        this.saveComments();
+          // 保存并同步
+        await this.saveComments();
+        await this.syncManager.saveComments(this.comments);
+        
+        // 通知变化
         this._onDidChangeComments.fire();
         
+        // 显示删除成功消息
+        vscode.window.showInformationMessage(`评论已删除: "${comment.text.substring(0, 30)}..."`);
+        
         return true;
+    }    /**
+     * 批量删除评论
+     */
+    async deleteComments(commentIds: string[]): Promise<number> {
+        let deletedCount = 0;
+        
+        for (const id of commentIds) {
+            const index = this.comments.findIndex(comment => comment.id === id);
+            if (index !== -1) {
+                this.comments.splice(index, 1);
+                deletedCount++;
+            }
+        }
+        
+        if (deletedCount > 0) {
+            await this.saveComments();
+            await this.syncManager.saveComments(this.comments);
+            this._onDidChangeComments.fire();
+            
+            vscode.window.showInformationMessage(`已删除 ${deletedCount} 条评论`);
+        }
+        
+        return deletedCount;
+    }
+    
+    /**
+     * 删除文件的所有评论
+     */
+    async deleteCommentsForFile(documentUri: string): Promise<number> {
+        const originalLength = this.comments.length;
+        this.comments = this.comments.filter(comment => comment.documentUri !== documentUri);
+        const deletedCount = originalLength - this.comments.length;
+        
+        if (deletedCount > 0) {
+            await this.saveComments();
+            await this.syncManager.saveComments(this.comments);
+            this._onDidChangeComments.fire();
+            
+            vscode.window.showInformationMessage(`已删除文件 ${deletedCount} 条评论`);
+        }
+        
+        return deletedCount;
     }
 
     /**
@@ -157,7 +226,11 @@ export class CommentService {
         try {
             // 使用同步管理器加载评论
             const loadedComments = await this.syncManager.loadComments();
-            this.comments = loadedComments;
+            
+            // 检查是否需要迁移旧格式评论
+            const migratedComments = await this.migrateLegacyComments(loadedComments);
+            
+            this.comments = migratedComments;
         } catch (error) {
             console.error('Failed to load comments:', error);
             this.comments = [];
@@ -340,6 +413,116 @@ export class CommentService {
             return await gitOps.getGitStatus();
         } catch (error) {
             return 'Git not available';
+        }    }
+
+    // ================== 位置追踪相关方法 ==================
+
+    /**
+     * 验证并更新评论位置
+     */    async validateAndUpdatePositions(documentUri: string): Promise<void> {
+        const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(documentUri));
+        const fileComments = this.getCommentsForFile(documentUri);
+        
+        if (fileComments.length === 0) {
+            return;
         }
+        
+        const updatedComments = await this.positionTracker.validateCommentPositions(document, fileComments);
+        
+        // 更新评论列表
+        updatedComments.forEach(updatedComment => {
+            const index = this.comments.findIndex(c => c.id === updatedComment.id);
+            if (index !== -1) {
+                this.comments[index] = updatedComment;
+            }
+        });
+        
+        await this.saveComments();
+        this._onDidChangeComments.fire();
+    }
+
+    /**
+     * 手动重新定位所有评论
+     */
+    async relocateAllComments(documentUri: string): Promise<void> {
+        await this.positionTracker.relocateAllComments(documentUri, this);
+    }
+
+    /**
+     * 更新评论列表（供位置追踪器调用）
+     */
+    updateComments(comments: Comment[]): void {
+        // 更新当前评论列表
+        comments.forEach(updatedComment => {
+            const index = this.comments.findIndex(c => c.id === updatedComment.id);
+            if (index !== -1) {
+                this.comments[index] = updatedComment;
+            }
+        });
+        
+        this.saveComments();
+        this._onDidChangeComments.fire();
+    }
+
+    /**
+     * 获取评论的当前有效位置
+     */
+    getCommentRange(comment: Comment): CommentRange {
+        // 如果评论已移动，返回新位置，否则返回原始位置
+        return comment.anchor.currentRange || comment.anchor.originalRange;
+    }
+
+    /**
+     * 迁移旧格式评论到新的锚点系统
+     */
+    private async migrateLegacyComments(comments: any[]): Promise<Comment[]> {
+        const migratedComments: Comment[] = [];
+        
+        for (const comment of comments) {
+            if (comment.range && !comment.anchor) {
+                // 这是旧格式的评论，需要迁移
+                try {
+                    const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(comment.documentUri));
+                    const vscodeRange = new vscode.Range(
+                        comment.range.startLine, comment.range.startCharacter,
+                        comment.range.endLine, comment.range.endCharacter
+                    );
+                    const anchor = await this.positionTracker.createAnchor(document, vscodeRange);
+                    
+                    migratedComments.push({
+                        ...comment,
+                        anchor,
+                        // 移除旧的range字段
+                        range: undefined
+                    } as Comment);
+                } catch (error) {
+                    console.warn('无法迁移评论:', comment.id, error);
+                    // 创建一个基本的锚点作为后备
+                    const anchor: CommentAnchor = {
+                        originalRange: comment.range,
+                        codeSnippet: '',
+                        status: 'valid',
+                        lastValidatedAt: Date.now()
+                    };
+                    migratedComments.push({
+                        ...comment,
+                        anchor,
+                        range: undefined
+                    } as Comment);
+                }
+            } else if (comment.anchor) {
+                // 新格式的评论
+                migratedComments.push(comment as Comment);
+            }
+        }
+        
+        return migratedComments;
+    }
+
+    /**
+     * 销毁方法
+     */
+    dispose(): void {
+        this.documentChangeListener?.dispose();
     }
 }
