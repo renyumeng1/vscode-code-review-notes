@@ -47,10 +47,10 @@
     {
         "label": "plus",
         "kind": 2,
-        "importPath": "test",
-        "description": "test",
+        "importPath": "test.test",
+        "description": "test.test",
         "peekOfCode": "def plus(a,b):\n    return a+b\nif __name__ == \"__main__\":\n    print(plus(1,2))\n    print(plus(3,4))\n    print(plus(5,6))\n    print(plus(7,8))\n    print(plus(9,10))\n    print(plus(11,12))\n    print(plus(13,14))",
-        "detail": "test",
+        "detail": "test.test",
         "documentation": {}
     }
 ]

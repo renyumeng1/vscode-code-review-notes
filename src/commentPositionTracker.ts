@@ -41,8 +41,7 @@ export class CommentPositionTracker {
             })
         );
     }
-    
-    /**
+      /**
      * 静默处理文档变化 - 不显示任何用户通知
      */
     private handleDocumentChangeSilent(event: vscode.TextDocumentChangeEvent) {
@@ -55,14 +54,26 @@ export class CommentPositionTracker {
             clearTimeout(existingTimeout);
         }
         
-        // 检查是否有行号变化
+        // 检查变化类型
         const hasLineChanges = event.contentChanges.some(change => 
             change.text.includes('\n') || 
             (change.rangeLength > 0 && change.range.start.line !== change.range.end.line)
         );
         
+        // 检查是否是简单的换行操作（如按Enter键）
+        const isSimpleNewlineInsert = event.contentChanges.length === 1 && 
+            event.contentChanges[0].text === '\n' && 
+            event.contentChanges[0].rangeLength === 0;
+        
         // 根据变化类型设置不同的响应延迟
-        const delay = hasLineChanges ? 100 : 500; // 行号变化快速响应，内容变化延迟响应
+        let delay;
+        if (isSimpleNewlineInsert) {
+            delay = 10; // 换行操作立即响应
+        } else if (hasLineChanges) {
+            delay = 50; // 其他行号变化快速响应
+        } else {
+            delay = 300; // 内容变化延迟响应
+        }
         
         // 设置新的定时器
         const timeout = setTimeout(() => {
@@ -147,11 +158,11 @@ export class CommentPositionTracker {
     ): Promise<Comment[]> {
         const text = document.getText();
         const lines = text.split('\n');
-        
-        return comments.map(comment => {
+          return comments.map(comment => {
             const anchor = comment.anchor;
             const originalRange = anchor.originalRange;
-              // 1. 首先尝试智能行号调整（处理简单的行号偏移）
+            
+            // 1. 首先尝试智能行号调整（处理简单的行号偏移）
             const adjustedAnchor = this.tryAdjustLineOffset(lines, anchor);
             
             // 2. 检查调整后的位置是否有效
@@ -165,7 +176,8 @@ export class CommentPositionTracker {
                     }
                 };
             }
-              // 2. 尝试重新定位
+            
+            // 3. 如果智能调整后仍然无效，尝试重新定位
             const newPosition = this.findNewPosition(lines, anchor);
             
             if (newPosition && this.isPositionChangeReasonable(anchor.originalRange, newPosition.range, newPosition.confidence)) {
@@ -181,7 +193,7 @@ export class CommentPositionTracker {
                 };
             }
             
-            // 3. 标记为可能删除
+            // 4. 标记为可能删除
             return {
                 ...comment,
                 anchor: {
@@ -595,43 +607,274 @@ export class CommentPositionTracker {
             return confidence >= 0.8;
         }
     }
-    
-    /**
+      /**
      * 尝试智能调整行号偏移（处理简单的插入/删除行操作）
      */
     private tryAdjustLineOffset(lines: string[], anchor: CommentAnchor): CommentAnchor {
         const originalRange = anchor.originalRange;
         const codeSnippet = anchor.codeSnippet.trim();
         
-        // 在原始位置附近搜索代码片段（上下各搜索3行）
-        const searchStart = Math.max(0, originalRange.startLine - 3);
-        const searchEnd = Math.min(lines.length - 1, originalRange.startLine + 3);
+        // 扩大搜索范围以处理插入空行等情况
+        const searchStart = Math.max(0, originalRange.startLine - 5);
+        const searchEnd = Math.min(lines.length - 1, originalRange.startLine + 10);
         
+        // 首先尝试精确匹配
         for (let i = searchStart; i <= searchEnd; i++) {
             const currentLine = lines[i];
             
             // 检查是否找到完全匹配的代码片段
             if (currentLine.trim() === codeSnippet) {
-                // 找到了，说明只是行号发生了偏移
                 const lineOffset = i - originalRange.startLine;
                 
                 if (lineOffset !== 0) {
-                    // 返回调整后的锚点
-                    return {
-                        ...anchor,
-                        originalRange: {
-                            startLine: i,
-                            startCharacter: currentLine.indexOf(codeSnippet),
-                            endLine: i,
-                            endCharacter: currentLine.indexOf(codeSnippet) + codeSnippet.length
-                        }
-                    };
+                    // 验证上下文以确保这是正确的位置
+                    if (this.validateContextForLineOffset(lines, anchor, i)) {
+                        return {
+                            ...anchor,
+                            originalRange: {
+                                startLine: i,
+                                startCharacter: currentLine.indexOf(codeSnippet.trim()),
+                                endLine: i,
+                                endCharacter: currentLine.indexOf(codeSnippet.trim()) + codeSnippet.length
+                            }
+                        };
+                    }
                 }
             }
         }
         
-        // 没有找到简单的偏移，返回原始锚点
+        // 如果精确匹配失败，尝试基于上下文的智能调整
+        return this.tryContextBasedAdjustment(lines, anchor);
+    }
+    
+    /**
+     * 验证行号偏移时的上下文
+     */
+    private validateContextForLineOffset(lines: string[], anchor: CommentAnchor, newLineIndex: number): boolean {
+        const beforeContext = anchor.beforeContext?.trim();
+        const afterContext = anchor.afterContext?.trim();
+        
+        // 检查前置上下文
+        if (beforeContext && newLineIndex > 0) {
+            for (let i = Math.max(0, newLineIndex - 3); i < newLineIndex; i++) {
+                const contextLine = lines[i].trim();
+                if (contextLine.includes(beforeContext) || beforeContext.includes(contextLine)) {
+                    // 检查后置上下文（如果存在）
+                    if (!afterContext) return true;
+                    
+                    for (let j = newLineIndex + 1; j < Math.min(lines.length, newLineIndex + 4); j++) {
+                        const afterLine = lines[j].trim();
+                        if (afterLine.includes(afterContext) || afterContext.includes(afterLine)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 如果没有前置上下文，只检查后置上下文
+        if (!beforeContext && afterContext && newLineIndex < lines.length - 1) {
+            for (let j = newLineIndex + 1; j < Math.min(lines.length, newLineIndex + 4); j++) {
+                const afterLine = lines[j].trim();
+                if (afterLine.includes(afterContext) || afterContext.includes(afterLine)) {
+                    return true;
+                }
+            }
+        }
+        
+        // 如果没有上下文，则接受位置变化（假设是简单的行号偏移）
+        return !beforeContext && !afterContext;
+    }    /**
+     * 基于上下文的智能调整
+     */
+    private tryContextBasedAdjustment(lines: string[], anchor: CommentAnchor): CommentAnchor {
+        const originalRange = anchor.originalRange;
+        const codeSnippet = anchor.codeSnippet.trim();
+        const beforeContext = anchor.beforeContext?.trim();
+        const afterContext = anchor.afterContext?.trim();
+        
+        // 如果有上下文信息，基于上下文重新定位
+        if (beforeContext || afterContext) {
+            // 寻找前置上下文
+            for (let i = 0; i < lines.length - 1; i++) {
+                const currentLine = lines[i].trim();
+                
+                if (beforeContext && (currentLine.includes(beforeContext) || beforeContext.includes(currentLine))) {
+                    // 扩大搜索范围
+                    for (let j = i + 1; j < Math.min(lines.length, i + 8); j++) {
+                        const targetLine = lines[j];
+                        const targetTrimmed = targetLine.trim();
+                        
+                        // 增强的匹配逻辑
+                        const similarity = this.calculateSimilarity(targetTrimmed, codeSnippet);
+                        const containsSnippet = targetTrimmed.includes(codeSnippet);
+                        const isKeywordMatch = this.hasSignificantKeywordMatch(targetTrimmed, codeSnippet);
+                        
+                        // 更宽松的匹配条件
+                        const isMatch = containsSnippet || 
+                            (codeSnippet.length > 10 && similarity > 0.6) ||
+                            (isKeywordMatch && similarity > 0.5);
+                        
+                        if (isMatch) {
+                            // 更宽松的后置上下文验证
+                            let afterContextValid = !afterContext;
+                            if (afterContext && j < lines.length - 1) {
+                                // 尝试多种方式找到后置上下文
+                                for (let k = j + 1; k < Math.min(lines.length, j + 8); k++) {
+                                    const afterLine = lines[k].trim();
+                                    const afterSimilarity = this.calculateSimilarity(afterLine, afterContext);
+                                    
+                                    // 宽松的后置上下文匹配
+                                    if (afterLine.includes(afterContext) || 
+                                        afterContext.includes(afterLine) ||
+                                        afterSimilarity > 0.5 ||
+                                        this.hasSignificantKeywordMatch(afterLine, afterContext)) {
+                                        afterContextValid = true;
+                                        break;
+                                    }
+                                }
+                                
+                                // 如果没找到精确的后置上下文，检查是否有相关的变量引用
+                                if (!afterContextValid) {
+                                    const keywords = this.extractKeywords(codeSnippet);
+                                    
+                                    for (let k = j + 1; k < Math.min(lines.length, j + 8); k++) {
+                                        const afterLine = lines[k].trim();
+                                        const afterKeywords = this.extractKeywords(afterLine);
+                                        
+                                        for (const keyword of keywords) {
+                                            if (afterLine.includes(keyword) || 
+                                                afterKeywords.some(w => this.areWordsRelated(w, keyword))) {
+                                                afterContextValid = true;
+                                                break;
+                                            }
+                                        }
+                                        if (afterContextValid) break;
+                                    }
+                                }
+                            }
+                            
+                            if (afterContextValid) {
+                                const startChar = targetLine.indexOf(codeSnippet);
+                                let adjustedStartChar = startChar >= 0 ? startChar : 0;
+                                let adjustedEndChar = startChar >= 0 ? startChar + codeSnippet.length : targetLine.length;
+                                
+                                // 关键词匹配时的位置调整
+                                if (startChar < 0 && isKeywordMatch) {
+                                    const keywords = codeSnippet.split(/\s+/).filter(w => w.length > 3);
+                                    const firstKeyword = keywords[0];
+                                    const keywordPos = targetLine.indexOf(firstKeyword);
+                                    if (keywordPos >= 0) {
+                                        adjustedStartChar = keywordPos;
+                                        adjustedEndChar = Math.min(targetLine.length, keywordPos + codeSnippet.length);
+                                    }
+                                }
+                                
+                                return {
+                                    ...anchor,
+                                    originalRange: {
+                                        startLine: j,
+                                        startCharacter: adjustedStartChar,
+                                        endLine: j,
+                                        endCharacter: adjustedEndChar
+                                    }
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 没有找到合适的调整，返回原始锚点
         return anchor;
+    }
+    
+    /**
+     * 检查是否有显著的关键词匹配
+     */
+    private hasSignificantKeywordMatch(str1: string, str2: string): boolean {
+        const keywords1 = this.extractKeywords(str1);
+        const keywords2 = this.extractKeywords(str2);
+        
+        if (keywords1.length === 0 || keywords2.length === 0) return false;
+        
+        let matchCount = 0;
+        const totalKeywords = Math.max(keywords1.length, keywords2.length);
+        
+        for (const keyword1 of keywords1) {
+            if (keywords2.some(keyword2 => 
+                keyword2.includes(keyword1) || 
+                keyword1.includes(keyword2) ||
+                this.areWordsRelated(keyword1, keyword2)
+            )) {
+                matchCount++;
+            }
+        }
+        
+        // 需要至少50%的关键词匹配
+        return (matchCount / totalKeywords) >= 0.5;
+    }
+    
+    /**
+     * 提取关键词
+     */
+    private extractKeywords(text: string): string[] {
+        return text
+            .split(/[\s\(\)\[\]\{\};,\.=+\-*\/]+/)
+            .filter(word => word.length > 2 && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(word))
+            .filter(word => !['const', 'let', 'var', 'function', 'return', 'console', 'log'].includes(word.toLowerCase()));
+    }
+    
+    /**
+     * 检查两个词是否相关（处理变量重命名等情况）
+     */
+    private areWordsRelated(word1: string, word2: string): boolean {
+        // 处理常见的变量重命名模式
+        const patterns = [
+            ['sum', 'result', 'value', 'total'],
+            ['data', 'info', 'content'],
+            ['item', 'element', 'node'],
+            ['index', 'idx', 'i'],
+            ['count', 'num', 'number']
+        ];
+        
+        for (const pattern of patterns) {
+            if (pattern.includes(word1.toLowerCase()) && pattern.includes(word2.toLowerCase())) {
+                return true;
+            }
+        }
+        
+        // 检查是否有共同的词根
+        if (word1.length > 4 && word2.length > 4) {
+            const root1 = word1.substring(0, Math.min(4, word1.length));
+            const root2 = word2.substring(0, Math.min(4, word2.length));
+            if (root1 === root2) return true;
+        }
+        
+        return false;
+    }
+      /**
+     * 计算两个字符串的相似度
+     */
+    private calculateSimilarity(str1: string, str2: string): number {
+        const words1 = str1.split(/\s+/).filter(w => w.length > 2);
+        const words2 = str2.split(/\s+/).filter(w => w.length > 2);
+        
+        if (words1.length === 0 || words2.length === 0) return 0;
+        
+        let matchCount = 0;
+        for (const word1 of words1) {
+            if (words2.some(word2 => 
+                word2.includes(word1) || 
+                word1.includes(word2) ||
+                this.areWordsRelated(word1, word2)
+            )) {
+                matchCount++;
+            }
+        }
+        
+        return matchCount / Math.max(words1.length, words2.length);
     }
     
     /**
