@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Comment } from './types';
+import { Comment, NotificationLevel } from './types';
 import { SyncStrategy, SyncMethod, SyncResult, SyncMetadata } from './syncStrategy';
 
 /**
@@ -118,12 +118,11 @@ export class GitSyncStrategy extends SyncStrategy {
 
             const content = new TextEncoder().encode(
                 JSON.stringify(syncData, null, 2)
-            );
+            );            await vscode.workspace.fs.writeFile(filePath, content);
 
-            await vscode.workspace.fs.writeFile(filePath, content);
-
-            vscode.window.showInformationMessage(
-                `💾 Comments synced to ${this.COMMENTS_FILE_NAME} (${comments.length} comments)`
+            this._showNotification(
+                `💾 Comments synced to ${this.COMMENTS_FILE_NAME} (${comments.length} comments)`,
+                NotificationLevel.Verbose
             );
 
         } catch (error) {
@@ -157,10 +156,9 @@ export class GitSyncStrategy extends SyncStrategy {
                 ...comment,
                 documentUri: this.toAbsolutePath(comment.documentUri),
                 replies: comment.replies || []
-            }));
-
-            vscode.window.showInformationMessage(
-                `📥 Loaded ${absoluteComments.length} comments from Git (last synced by ${data.syncedBy})`
+            }));            this._showNotification(
+                `📥 Loaded ${absoluteComments.length} comments from Git (last synced by ${data.syncedBy})`,
+                NotificationLevel.Minimal
             );
 
             return absoluteComments;
@@ -169,11 +167,11 @@ export class GitSyncStrategy extends SyncStrategy {
             if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
                 // 文件不存在是正常情况
                 return [];
-            }
-
-            console.error('Failed to load comments from file:', error);
-            vscode.window.showErrorMessage(
-                `Failed to load comments from Git: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }            console.error('Failed to load comments from file:', error);
+            this._showNotification(
+                `Failed to load comments from Git: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                NotificationLevel.Minimal,
+                true
             );
             return [];
         }
@@ -257,18 +255,18 @@ export class GitSyncStrategy extends SyncStrategy {
             const mergedComments = await this.mergeComments(localComments, remoteComments);
 
             // 3. 保存合并后的评论
-            await this.saveCommentsToFile(mergedComments);
-
-            vscode.window.showInformationMessage(
-                `🔄 Sync completed: ${mergedComments.length} total comments`
+            await this.saveCommentsToFile(mergedComments);            this._showNotification(
+                `🔄 Sync completed: ${mergedComments.length} total comments`,
+                NotificationLevel.Minimal
             );
 
             return mergedComments;
 
-        } catch (error) {
-            console.error('Full sync failed:', error);
-            vscode.window.showErrorMessage(
-                `Sync failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+        } catch (error) {            console.error('Full sync failed:', error);
+            this._showNotification(
+                `Sync failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                NotificationLevel.Minimal,
+                true
             );
             throw error;
         }
@@ -282,9 +280,9 @@ export class GitSyncStrategy extends SyncStrategy {
         
         // 更新配置
         await config.update('autoSyncOnSave', true, vscode.ConfigurationTarget.Workspace);
-        
-        vscode.window.showInformationMessage(
-            '✅ Auto-sync enabled! Comments will be synced automatically when you save files.'
+          this._showNotification(
+            '✅ Auto-sync enabled! Comments will be synced automatically when you save files.',
+            NotificationLevel.Minimal
         );
     }
 
@@ -313,5 +311,36 @@ export class GitSyncStrategy extends SyncStrategy {
         const diffMins = Math.floor(diffMs / (1000 * 60));
 
         return `Synced ${diffMins}m ago by ${metadata.syncedBy}`;
+    }
+
+    /**
+     * 根据通知等级显示通知
+     * @param message 通知消息
+     * @param level 此通知的等级
+     * @param isError 是否为错误消息 (默认为 false)
+     */
+    private _showNotification(message: string, level: NotificationLevel, isError: boolean = false): void {
+        const config = vscode.workspace.getConfiguration('codeReviewNotes');
+        const configuredLevel = config.get<NotificationLevel>('notificationLevel') || NotificationLevel.Minimal;
+
+        if (configuredLevel === NotificationLevel.None) {
+            return; 
+        }
+
+        if (configuredLevel === NotificationLevel.Minimal) {
+            if (level === NotificationLevel.Minimal || isError) {
+                if (isError) {
+                    vscode.window.showErrorMessage(message);
+                } else {
+                    vscode.window.showInformationMessage(message);
+                }
+            }
+        } else if (configuredLevel === NotificationLevel.Verbose) {
+            if (isError) {
+                vscode.window.showErrorMessage(message);
+            } else {
+                vscode.window.showInformationMessage(message);
+            }
+        }
     }
 }

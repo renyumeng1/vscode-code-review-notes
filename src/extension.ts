@@ -228,7 +228,7 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             }
 
-            vscode.window.showInformationMessage('测试评论已创建，每个用户将显示不同的颜色！');
+            showNotification('测试评论已创建，每个用户将显示不同的颜色！', NotificationLevel.Verbose);
         }),
 
         // ================== 新的同步相关命令 ==================
@@ -251,9 +251,9 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('code-review-notes.getSyncStatus', async () => {
             try {
                 const status = await commentService.getSyncStatus();
-                vscode.window.showInformationMessage(`同步状态: ${status}`);
+                showNotification(`同步状态: ${status}`, NotificationLevel.Minimal);
             } catch (error) {
-                vscode.window.showErrorMessage(`获取同步状态失败: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                showNotification(`获取同步状态失败: ${error instanceof Error ? error.message : 'Unknown error'}`, NotificationLevel.Minimal, true);
             }
         }),
 
@@ -333,7 +333,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('code-review-notes.addCommentToLine', async (uri: vscode.Uri, lineNumber: number, commentText?: string) => {
             const editor = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === uri.toString());
             if (!editor) {
-                vscode.window.showErrorMessage('找不到对应的编辑器');
+                showNotification('找不到对应的编辑器', NotificationLevel.Minimal, true);
                 return;
             }
             
@@ -381,7 +381,7 @@ async function addComment(): Promise<void> {
 
     const selection = activeEditor.selection;
     if (selection.isEmpty) {
-        vscode.window.showErrorMessage('请先选择要评论的文本');
+        showNotification('请先选择要评论的文本', NotificationLevel.Minimal, true);
         return;
     }
 
@@ -420,7 +420,7 @@ async function addComment(): Promise<void> {
         defaultAuthor
     );
 
-    vscode.window.showInformationMessage('评论已添加');
+    showNotification('评论已添加', NotificationLevel.Minimal);
 }
 
 /**
@@ -448,9 +448,9 @@ async function replyToComment(commentId: string): Promise<void> {
 
     const reply = commentService.addReply(commentId, replyText.trim(), defaultAuthor);
     if (reply) {
-        vscode.window.showInformationMessage('回复已添加');
+        showNotification('回复已添加', NotificationLevel.Minimal);
     } else {
-        vscode.window.showErrorMessage('未找到对应的评论');
+        showNotification('未找到对应的评论', NotificationLevel.Minimal, true);
     }
 }
 
@@ -460,7 +460,7 @@ async function replyToComment(commentId: string): Promise<void> {
 async function goToComment(commentId: string): Promise<void> {
     const comment = commentService.getCommentById(commentId);
     if (!comment) {
-        vscode.window.showErrorMessage('未找到评论');
+        showNotification('未找到评论', NotificationLevel.Minimal, true);
         return;
     }
 
@@ -494,7 +494,7 @@ async function goToComment(commentId: string): Promise<void> {
         }, 3000);
 
     } catch (error) {
-        vscode.window.showErrorMessage(`无法打开文件: ${error}`);
+        showNotification(`无法打开文件: ${error}`, NotificationLevel.Minimal, true);
     }
 }
 
@@ -510,7 +510,7 @@ async function addCommentWithText(commentText: string): Promise<void> {
 
     const selection = activeEditor.selection;
     if (selection.isEmpty) {
-        vscode.window.showErrorMessage('请先选择要评论的文本');
+        showNotification('请先选择要评论的文本', NotificationLevel.Minimal, true);
         return;
     }
 
@@ -548,7 +548,7 @@ async function addCommentWithText(commentText: string): Promise<void> {
  * @param isError 是否为错误消息 (默认为 false)
  */
 function showNotification(message: string, level: NotificationLevel, isError: boolean = false): void {
-    const config = vscode.workspace.getConfiguration('codeReview');
+    const config = vscode.workspace.getConfiguration('codeReviewNotes');
     const configuredLevel = config.get<NotificationLevel>('notificationLevel') || NotificationLevel.Minimal;
 
     if (configuredLevel === NotificationLevel.None) {

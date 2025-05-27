@@ -1,8 +1,7 @@
-{
-  "name": "code-review-notes",
+{  "name": "code-review-notes",
   "displayName": "Code Review Notes",
   "description": "A powerful VS Code extension for code review with flexible sync system, multi-user collaboration, resolver tracking, and user-specific color coding",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "publisher": "renyumeng",
   "author": {
     "name": "renyumeng",
@@ -365,18 +364,16 @@
           "type": "string",
           "default": "",
           "description": "Authentication token for server synchronization"
-        },
-        "codeReviewNotes.enableRealTimeSync": {
+        },        "codeReviewNotes.enableRealTimeSync": {
           "type": "boolean",
           "default": false,
           "description": "Enable real-time synchronization for server-based sync (requires server support)"
-,
-        "codeReview.notificationLevel": {
+        },
+        "codeReviewNotes.notificationLevel": {
           "type": "string",
           "enum": ["none", "minimal", "verbose"],
           "default": "minimal",
-          "description": "Controls the level of notifications displayed. 'none': no notifications, 'minimal': only important/error notifications, 'verbose': all notifications."
-        }
+          "description": "控制通知显示的级别：'none'不显示通知，'minimal'只显示重要通知，'verbose'显示所有通知"
         }
       }
     }

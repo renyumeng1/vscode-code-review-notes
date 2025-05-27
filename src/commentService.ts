@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Comment, CommentReply, CommentRange, CommentData, CommentAnchor, LegacyComment } from './types';
+import { Comment, CommentReply, CommentRange, CommentData, CommentAnchor, LegacyComment, NotificationLevel } from './types';
 import { v4 as uuidv4 } from 'uuid';
 import { SyncManager } from './syncManager';
 import { SyncMethod } from './syncStrategy';
@@ -172,7 +172,7 @@ export class CommentService {
         this._onDidChangeComments.fire();
         
         // 显示删除成功消息
-        vscode.window.showInformationMessage(`评论已删除: "${comment.text.substring(0, 30)}..."`);
+        this._showNotification(`评论已删除: "${comment.text.substring(0, 30)}..."`, NotificationLevel.Minimal);
         
         return true;
     }    /**
@@ -194,7 +194,7 @@ export class CommentService {
             await this.syncManager.saveComments(this.comments);
             this._onDidChangeComments.fire();
             
-            vscode.window.showInformationMessage(`已删除 ${deletedCount} 条评论`);
+            this._showNotification(`已删除 ${deletedCount} 条评论`, NotificationLevel.Minimal);
         }
         
         return deletedCount;
@@ -299,7 +299,7 @@ export class CommentService {
 
         if (username && username.trim() !== currentUser) {
             await this.setCurrentUser(username.trim());
-            vscode.window.showInformationMessage(`用户名已更新为：${username.trim()}`);
+            this._showNotification(`用户名已更新为：${username.trim()}`, NotificationLevel.Minimal);
         }
 
         return username?.trim();
@@ -315,10 +315,10 @@ export class CommentService {
             const mergedComments = await this.syncManager.performFullSync(this.comments);
             this.comments = mergedComments;
             this._onDidChangeComments.fire();
-            vscode.window.showInformationMessage('✅ 同步完成');
+            this._showNotification('✅ 同步完成', NotificationLevel.Verbose);
         } catch (error) {
             console.error('Full sync failed:', error);
-            vscode.window.showErrorMessage(`同步失败: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            this._showNotification(`同步失败: ${error instanceof Error ? error.message : 'Unknown error'}`, NotificationLevel.Minimal, true);
             throw error;
         }
     }
@@ -379,13 +379,13 @@ export class CommentService {
                 this.comments = mergedComments;
                 await this.saveComments();
                 this._onDidChangeComments.fire();
-                vscode.window.showInformationMessage(`📥 从Git加载了 ${gitComments.length} 条评论`);
+                this._showNotification(`📥 从Git加载了 ${gitComments.length} 条评论`, NotificationLevel.Verbose);
             } else {
-                vscode.window.showInformationMessage('📥 Git中没有评论文件');
+                this._showNotification('📥 Git中没有评论文件', NotificationLevel.Verbose);
             }
         } catch (error) {
             console.error('Load from Git failed:', error);
-            vscode.window.showErrorMessage(`从Git加载失败: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            this._showNotification(`从Git加载失败: ${error instanceof Error ? error.message : 'Unknown error'}`, NotificationLevel.Minimal, true);
             throw error;
         }
     }
@@ -399,7 +399,7 @@ export class CommentService {
             await gitOps.setupAutoSync();
         } catch (error) {
             console.error('Enable auto sync failed:', error);
-            vscode.window.showErrorMessage(`启用自动同步失败: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            this._showNotification(`启用自动同步失败: ${error instanceof Error ? error.message : 'Unknown error'}`, NotificationLevel.Minimal, true);
             throw error;
         }
     }
@@ -519,6 +519,30 @@ export class CommentService {
         return migratedComments;
     }
 
+private _showNotification(message: string, level: NotificationLevel, isError: boolean = false): void {
+        const config = vscode.workspace.getConfiguration('codeReview');
+        const configuredLevel = config.get<NotificationLevel>('notificationLevel') || NotificationLevel.Minimal;
+
+        if (configuredLevel === NotificationLevel.None) {
+            return; 
+        }
+
+        if (configuredLevel === NotificationLevel.Minimal) {
+            if (level === NotificationLevel.Minimal || isError) {
+                if (isError) {
+                    vscode.window.showErrorMessage(message);
+                } else {
+                    vscode.window.showInformationMessage(message);
+                }
+            }
+        } else if (configuredLevel === NotificationLevel.Verbose) {
+            if (isError) {
+                vscode.window.showErrorMessage(message);
+            } else {
+                vscode.window.showInformationMessage(message);
+            }
+        }
+    }
     /**
      * 销毁方法
      */

@@ -2,6 +2,50 @@
 
 All notable changes to the "code-review-notes" extension will be documented in this file.
 
+## [0.1.4] - 2025-05-27
+
+### 🛠️ Bug Fixes & Improvements
+
+### Enhanced
+- **🔔 通知系统优化**: 扩展通知级别控制系统，减少同步操作和其他非关键操作的通知干扰
+  - 同步通知现在遵循用户配置的通知级别设置
+  - 优化Git同步通知，遵循通知级别控制
+  - 将通知等级系统集成到所有模块中
+
+### Fixed
+- 修复了Git同步服务中的通知级别控制问题
+- 优化各种非必要通知的显示逻辑
+- 统一通知系统接口，确保一致的用户体验
+
+## [0.1.3] - 2025-05-27
+
+### 🛠️ 持续优化改进
+
+### Fixed
+- 修复了其他已知问题和性能优化
+
+## [0.1.2] - 2025-05-27
+
+### 🛠️ 稳定性增强
+
+### Fixed
+- 修复了首次启动时可能出现的UI闪烁问题
+- 修复了选择跟踪的边缘情况
+
+## [0.1.1] - 2025-05-27
+
+### 🛠️ Bug Fixes & Improvements
+
+### Added
+- **🔔 通知级别控制**: 新增通知级别配置选项，用户可根据需要控制通知显示频率
+  - `codeReviewNotes.notificationLevel`: 控制通知显示级别（none/minimal/verbose）
+
+### Fixed
+- 修复AddComment UI在无文本选择时错误显示的问题
+- 修复通知配置密钥错误（从'codeReview'更正为'codeReviewNotes'）
+- 优化通知系统，减少不必要的通知频率
+- 在多个模块中实现一致的通知级别控制
+
 ## [0.1.0] - 2025-05-26
 
 ### 🚀 Major Feature Release: Flexible Synchronization System

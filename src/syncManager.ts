@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Comment } from './types';
+import { Comment, NotificationLevel } from './types';
 import { SyncStrategy, SyncMethod, SyncResult } from './syncStrategy';
 import { LocalSyncStrategy } from './localSyncStrategy';
 import { GitSyncStrategy } from './gitSyncService';
@@ -60,7 +60,7 @@ export class SyncManager {
                 break;
         }
         
-        vscode.window.showInformationMessage(`同步方法已切换为: ${this.getSyncMethodDisplayName(method)}`);
+        this._showNotification(`同步方法已切换为: ${this.getSyncMethodDisplayName(method)}`, NotificationLevel.Minimal);
     }
 
     /**
@@ -218,5 +218,29 @@ export class SyncManager {
             getTeamMembers: () => this.serverStrategy.getTeamMembers(),
             enableRealTimeSync: () => this.serverStrategy.enableRealTimeSync()
         };
+    }
+private _showNotification(message: string, level: NotificationLevel, isError: boolean = false): void {
+        const config = vscode.workspace.getConfiguration('codeReviewNotes');
+        const configuredLevel = config.get<NotificationLevel>('notificationLevel') || NotificationLevel.Minimal;
+
+        if (configuredLevel === NotificationLevel.None) {
+            return; 
+        }
+
+        if (configuredLevel === NotificationLevel.Minimal) {
+            if (level === NotificationLevel.Minimal || isError) {
+                if (isError) {
+                    vscode.window.showErrorMessage(message);
+                } else {
+                    vscode.window.showInformationMessage(message);
+                }
+            }
+        } else if (configuredLevel === NotificationLevel.Verbose) {
+            if (isError) {
+                vscode.window.showErrorMessage(message);
+            } else {
+                vscode.window.showInformationMessage(message);
+            }
+        }
     }
 }
