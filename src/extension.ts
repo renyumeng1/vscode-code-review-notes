@@ -351,7 +351,17 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }),
 
-        // ...existing code...
+        // 添加内联评论（真正的内联聊天窗口）
+        vscode.commands.registerCommand('code-review-notes.addCommentInline', async (uri: vscode.Uri, lineNumber: number) => {
+            const editor = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === uri.toString());
+            if (!editor) {
+                showNotification('找不到对应的编辑器', NotificationLevel.Minimal, true);
+                return;
+            }
+            
+            // 使用新的真正内联聊天窗口
+            await inlineCommentUIManager.showInlineChatWindow(editor, lineNumber);
+        }),
     ];
 
     // 监听活动编辑器变化
