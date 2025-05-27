@@ -1,8 +1,7 @@
-  {
-  "name": "code-review-notes",
+{  "name": "code-review-notes",
   "displayName": "Code Review Notes",
   "description": "A powerful VS Code extension for code review with flexible sync system, multi-user collaboration, resolver tracking, and user-specific color coding",
-  "version": "0.1.6",
+  "version": "0.1.5",
   "publisher": "renyumeng",
   "author": {
     "name": "renyumeng",

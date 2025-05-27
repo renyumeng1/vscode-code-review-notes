@@ -173,9 +173,11 @@ export class InlineChatWidget {
             );
 
             // 刷新评论显示
-            vscode.commands.executeCommand('code-review-notes.refreshComments');        } catch (error) {
+            vscode.commands.executeCommand('code-review-notes.refreshComments');
+
+        } catch (error) {
             console.error('添加评论失败:', error);
-            vscode.window.showErrorMessage('添加失败');
+            vscode.window.showErrorMessage('添加评论失败: ' + error);
         }
     }
 
