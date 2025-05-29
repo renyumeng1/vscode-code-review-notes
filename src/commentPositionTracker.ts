@@ -6,12 +6,24 @@ import { Comment, CommentAnchor, CommentRange } from './types';
  * 负责智能跟踪评论位置，处理代码删除/移动等情况
  */
 export class CommentPositionTracker {
+    private static readonly MAX_SKIPS_BETWEEN_ORIGINAL_LINES = 3; // 在寻找下一条原始代码行时，最多可以跳过多少当前文档的行
+
     private disposables: vscode.Disposable[] = [];
     private documentChangeHandlers: Map<string, NodeJS.Timeout> = new Map();
-    private silentMode: boolean = true; // 静默模式，不显示通知
+    private silentMode: boolean = true;
     
-    constructor() {
+    // 新增：文档状态缓存，用于对比变化
+    private documentStateCache: Map<string, {
+        lineCount: number;
+        contentHash: string;
+        lastModified: number;
+    }> = new Map();
+    
+    // 新增：评论位置缓存，用于快速定位
+    private commentPositionCache: Map<string, Map<string, CommentAnchor>> = new Map();// 静默模式，不显示通知
+      constructor() {
         this.setupSilentRealTimeMonitoring();
+        this.setupAdvancedChangeDetection();
     }
     
     /**
@@ -40,9 +52,8 @@ export class CommentPositionTracker {
                 }
             })
         );
-    }
-      /**
-     * 静默处理文档变化 - 不显示任何用户通知
+    }    /**
+     * 静默处理文档变化 - 增强版，监控所有类型的代码变化
      */
     private handleDocumentChangeSilent(event: vscode.TextDocumentChangeEvent) {
         const document = event.document;
@@ -54,34 +65,318 @@ export class CommentPositionTracker {
             clearTimeout(existingTimeout);
         }
         
-        // 检查变化类型
-        const hasLineChanges = event.contentChanges.some(change => 
-            change.text.includes('\n') || 
-            (change.rangeLength > 0 && change.range.start.line !== change.range.end.line)
-        );
-        
-        // 检查是否是简单的换行操作（如按Enter键）
-        const isSimpleNewlineInsert = event.contentChanges.length === 1 && 
-            event.contentChanges[0].text === '\n' && 
-            event.contentChanges[0].rangeLength === 0;
+        // 分析所有类型的变化
+        const changeAnalysis = this.analyzeAllDocumentChanges(event);
         
         // 根据变化类型设置不同的响应延迟
         let delay;
-        if (isSimpleNewlineInsert) {
-            delay = 10; // 换行操作立即响应
-        } else if (hasLineChanges) {
-            delay = 50; // 其他行号变化快速响应
+        if (changeAnalysis.isEnterKey) {
+            delay = 10; // Enter键：立即响应
+        } else if (changeAnalysis.hasLineInsertion || changeAnalysis.hasLineDeletion) {
+            delay = 50; // 其他行级变化：快速响应
+        } else if (changeAnalysis.hasLargeChange) {
+            delay = 200; // 大量变化（粘贴、替换）：稍微延迟
         } else {
-            delay = 300; // 内容变化延迟响应
+            delay = 400; // 小的内容变化：较长延迟
+        }
+        
+        // 记录变化用于调试
+        if (!this.silentMode) {
+            console.log(`文档变化检测: ${changeAnalysis.changeType}, 延迟: ${delay}ms`);
         }
         
         // 设置新的定时器
         const timeout = setTimeout(() => {
-            this.validateDocumentCommentsSilent(document);
+            this.processAdvancedDocumentChange(document, changeAnalysis);
             this.documentChangeHandlers.delete(uri);
         }, delay);
         
         this.documentChangeHandlers.set(uri, timeout);
+    }
+    
+    /**
+     * 分析所有类型的文档变化
+     */
+    private analyzeAllDocumentChanges(event: vscode.TextDocumentChangeEvent): {
+        isEnterKey: boolean;
+        isDeleteKey: boolean;
+        hasLineInsertion: boolean;
+        hasLineDeletion: boolean;
+        hasLargeChange: boolean;
+        hasMultiLineChange: boolean;
+        changeType: 'enter' | 'delete' | 'paste' | 'cut' | 'type' | 'replace' | 'mixed';
+        totalChangedChars: number;
+        affectedLineRange: { start: number; end: number };
+        netLineChange: number; // 新增：净行数变化
+        changeStartLine: number; // 新增：变化起始行
+    } {
+        let isEnterKey = false;
+        let isDeleteKey = false;
+        let hasLineInsertion = false;
+        let hasLineDeletion = false;
+        let totalChangedChars = 0;
+        let minAffectedLine = Number.MAX_SAFE_INTEGER;
+        let maxAffectedLine = 0;
+        let netLineChange = 0;
+        let changeStartLine = Number.MAX_SAFE_INTEGER;
+        
+        // 分析每个变化
+        for (const change of event.contentChanges) {
+            const newLineCount = (change.text.match(/\n/g) || []).length;
+            const deletedLineCount = change.range.end.line - change.range.start.line;
+
+            // 计算净行数变化和变化起始行
+            const insertedLinesInChange = newLineCount; // newLineCount 已经是插入的换行符数量
+            const deletedLinesInChange = deletedLineCount;
+            netLineChange += insertedLinesInChange - deletedLinesInChange;
+            changeStartLine = Math.min(changeStartLine, change.range.start.line);
+            
+            // 检测Enter键：单个换行符插入，无删除
+            if (change.text === '\n' && change.rangeLength === 0 && event.contentChanges.length === 1) {
+                isEnterKey = true;
+            }
+            
+            // 检测删除键：只删除不插入，或删除后插入较少内容
+            if (change.rangeLength > 0 && change.text.length === 0) {
+                isDeleteKey = true;
+            }
+            
+            // 检测行插入（Enter、粘贴多行等）
+            if (insertedLinesInChange > 0) { // 使用 insertedLinesInChange
+                hasLineInsertion = true;
+            }
+            
+            // 检测行删除（删除键、剪切等）
+            if (deletedLinesInChange > 0 || (change.rangeLength > 0 && insertedLinesInChange === 0)) { // 使用 deletedLinesInChange 和 insertedLinesInChange
+                hasLineDeletion = true;
+            }
+            
+            // 统计变化范围
+            minAffectedLine = Math.min(minAffectedLine, change.range.start.line);
+            maxAffectedLine = Math.max(maxAffectedLine, change.range.end.line + insertedLinesInChange); // 使用 insertedLinesInChange
+            
+            totalChangedChars += change.text.length + change.rangeLength;
+        }
+        
+        // 判断变化类型
+        let changeType: 'enter' | 'delete' | 'paste' | 'cut' | 'type' | 'replace' | 'mixed' = 'type';
+        
+        if (isEnterKey) {
+            changeType = 'enter';
+        } else if (isDeleteKey && !hasLineInsertion) {
+            changeType = 'delete';
+        } else if (totalChangedChars > 50 && hasLineInsertion) {
+            changeType = 'paste';
+        } else if (hasLineDeletion && totalChangedChars > 20) {
+            changeType = 'cut';
+        } else if (hasLineInsertion && hasLineDeletion) {
+            changeType = 'replace';
+        } else if (event.contentChanges.length > 1) {
+            changeType = 'mixed';
+        }
+        
+        return {
+            isEnterKey,
+            isDeleteKey,
+            hasLineInsertion,
+            hasLineDeletion,
+            hasLargeChange: totalChangedChars > 100,
+            hasMultiLineChange: hasLineInsertion || hasLineDeletion,
+            changeType,
+            totalChangedChars,
+            affectedLineRange: {
+                start: minAffectedLine === Number.MAX_SAFE_INTEGER ? 0 : minAffectedLine,
+                end: maxAffectedLine
+            },
+            netLineChange,
+            changeStartLine: changeStartLine === Number.MAX_SAFE_INTEGER && event.contentChanges.length > 0
+                             ? event.contentChanges[0].range.start.line
+                             : (changeStartLine === Number.MAX_SAFE_INTEGER ? 0 : changeStartLine)
+        };
+    }
+    
+    /**
+     * 处理高级文档变化
+     */
+    private async processAdvancedDocumentChange(
+        document: vscode.TextDocument,
+        changeAnalysis: any
+    ): Promise<void> {
+        try {
+            // 更新文档状态缓存
+            this.updateDocumentCache(document);
+            
+            // 如果有评论缓存，更新相关评论的上下文
+            if (changeAnalysis.hasMultiLineChange) {
+                await this.updateCommentContextsForChanges(document, changeAnalysis);
+            }
+            
+            // 通知需要静默验证
+            if (this.onSilentValidationNeeded) {
+                this.onSilentValidationNeeded(document);
+            }
+            
+        } catch (error) {
+            console.error('处理高级文档变化时出错:', error);
+        }
+    }
+    
+    /**
+     * 为变化更新评论上下文
+     */
+    private async updateCommentContextsForChanges(
+        document: vscode.TextDocument,
+        changeAnalysis: any
+    ): Promise<void> {
+        const uri = document.uri.toString();
+        const commentCache = this.commentPositionCache.get(uri);
+        
+        if (!commentCache || commentCache.size === 0) {
+            return;
+        }
+        
+        const lines = document.getText().split('\n');
+        const affectedRange = changeAnalysis.affectedLineRange;
+        const netLineChange = changeAnalysis.netLineChange;
+        const changeStartLine = changeAnalysis.changeStartLine;
+
+        // 首先，直接调整受影响的评论行号
+        if (netLineChange !== 0) {
+            commentCache.forEach(anchor => {
+                if (anchor.originalRange.startLine >= changeStartLine) {
+                    anchor.originalRange.startLine = Math.max(0, anchor.originalRange.startLine + netLineChange);
+                    anchor.originalRange.endLine = Math.max(0, anchor.originalRange.endLine + netLineChange);
+                }
+            });
+        }
+        
+        // 只更新受影响范围内或附近的评论
+        for (const [commentId, anchor] of commentCache.entries()) {
+            const range = anchor.originalRange;
+            
+            // 检查评论是否在受影响的范围内或附近（±5行）
+            const isNearAffectedArea = 
+                range.startLine >= affectedRange.start - 5 && 
+                range.startLine <= affectedRange.end + 5;
+            
+            if (isNearAffectedArea) {
+                try {
+                    // 重新计算该评论的上下文
+                    const updatedAnchor = await this.recalculateCommentContext(
+                        document, anchor, lines, changeAnalysis
+                    );
+                    commentCache.set(commentId, updatedAnchor);
+                } catch (error) {
+                    console.error(`更新评论 ${commentId} 上下文时出错:`, error);
+                }
+            }
+        }
+    }
+    
+    /**
+     * 重新计算单个评论的上下文
+     */
+    private async recalculateCommentContext(
+        document: vscode.TextDocument,
+        anchor: CommentAnchor,
+        lines: string[], // 当前文档的行
+        changeAnalysis: any // 可选，如果需要更细致的调整
+    ): Promise<CommentAnchor> {
+        const originalRange = anchor.originalRange; // 这是上一次已知的位置
+
+        // 检查上一次已知位置是否仍然有效
+        // 检查上一次已知位置是否仍然有效。
+        // 注意：isOriginalPositionValid 会比较当前文档在 originalRange 的片段与 anchor.codeSnippet。
+        // 如果代码片段内部有修改，isOriginalPositionValid 会返回 false，从而触发后续的 findNewPosition 逻辑。
+        // findNewPosition 应该能够找到修改后的代码（即使范围不变），然后 createAnchor 会重新生成所有信息。
+        // 因此，这里的 if 分支主要处理行号可能已通过 tryAdjustLineOffset 调整，但代码片段内容未变的情况。
+        // 或者是代码片段和行号都未变的情况。
+        // 无论哪种情况，如果 originalRange 被认为是有效的，我们都应该基于这个 originalRange 重新提取所有数据。
+        if (this.isOriginalPositionValid(lines, anchor)) {
+            // 位置有效（行号可能已调整，也可能未调整），并且当前文档在该位置的代码片段与存储的 codeSnippet 匹配。
+            // 这意味着代码片段本身没有变化，但其上下文可能因周围代码的增删而改变。
+            // 或者，这是一个新创建的、尚未移动的评论的初次验证。
+            // 我们需要确保 codeSnippet, beforeContext, 和 afterContext 都从当前文档状态更新。
+            const currentActualSnippet = this.extractSnippetFromLines(lines, originalRange); // 重新提取以确保
+            const beforeLinesCount = 2; // 与 createAnchor 保持一致
+            const afterLinesCount = 2;  // 与 createAnchor 保持一致
+            
+            const beforeContext = lines
+                .slice(Math.max(0, originalRange.startLine - beforeLinesCount), originalRange.startLine)
+                .join('\n');
+                
+            const afterContext = lines
+                .slice(originalRange.endLine + 1, Math.min(lines.length, originalRange.endLine + afterLinesCount + 1))
+                .join('\n');
+            
+            return {
+                ...anchor,
+                originalRange: originalRange, // originalRange 自身在此分支中被认为是有效的
+                codeSnippet: currentActualSnippet,
+                beforeContext,
+                afterContext,
+                status: 'valid',
+                lastValidatedAt: Date.now(),
+                currentRange: undefined, // 如果之前是 'moved'，现在回到 'valid'，清除这些字段
+                confidence: undefined
+            };
+        }
+        
+        // 位置无效或代码片段不匹配，尝试重新定位
+        const newPosition = this.findNewPosition(lines, anchor); // 使用旧 anchor 搜索
+        if (newPosition && this.isPositionChangeReasonable(anchor.originalRange, newPosition.range, newPosition.confidence)) {
+            const newVsCodeRange = new vscode.Range(
+                newPosition.range.startLine, newPosition.range.startCharacter,
+                newPosition.range.endLine, newPosition.range.endCharacter
+            );
+            // 使用 createAnchor 从新位置创建全新的锚点
+            const newAnchorFull = await this.createAnchor(document, newVsCodeRange);
+            return {
+                ...newAnchorFull, // 包含新的 snippet, range, context
+                status: 'moved',
+                currentRange: newPosition.range, // 明确移动后的位置
+                confidence: newPosition.confidence,
+                lastValidatedAt: Date.now()
+            };
+        }
+        
+        // 无法重新定位，标记为已删除
+        return {
+            ...anchor,
+            status: 'deleted',
+            lastValidatedAt: Date.now()
+        };
+    }
+    
+    /**
+     * 更新文档状态缓存
+     */
+    private updateDocumentCache(document: vscode.TextDocument) {
+        const uri = document.uri.toString();
+        const content = document.getText();
+        const lineCount = document.lineCount;
+        
+        // 简单的内容哈希
+        const contentHash = this.simpleHash(content);
+        
+        this.documentStateCache.set(uri, {
+            lineCount,
+            contentHash,
+            lastModified: Date.now()
+        });
+    }
+    
+    /**
+     * 简单哈希函数
+     */
+    private simpleHash(str: string): string {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // 转换为32位整数
+        }
+        return hash.toString();
     }
     
     /**
@@ -114,22 +409,21 @@ export class CommentPositionTracker {
      * 创建评论锚点，包含上下文信息
      */
     async createAnchor(
-        document: vscode.TextDocument, 
-        range: vscode.Range
+        document: vscode.TextDocument,
+        range: vscode.Range // vscode.Range 本身就能表示多行
     ): Promise<CommentAnchor> {
         const text = document.getText();
         const lines = text.split('\n');
         
-        // 获取上下文
-        const beforeLines = 2; // 前2行
-        const afterLines = 2;  // 后2行
+        const beforeLinesCount = 2;
+        const afterLinesCount = 2;
         
         const beforeContext = lines
-            .slice(Math.max(0, range.start.line - beforeLines), range.start.line)
+            .slice(Math.max(0, range.start.line - beforeLinesCount), range.start.line)
             .join('\n');
             
         const afterContext = lines
-            .slice(range.end.line + 1, Math.min(lines.length, range.end.line + afterLines + 1))
+            .slice(range.end.line + 1, Math.min(lines.length, range.end.line + afterLinesCount + 1))
             .join('\n');
             
         const codeSnippet = document.getText(range);
@@ -153,26 +447,45 @@ export class CommentPositionTracker {
      * 验证并更新评论位置
      */
     async validateCommentPositions(
-        document: vscode.TextDocument, 
+        document: vscode.TextDocument,
         comments: Comment[]
     ): Promise<Comment[]> {
         const text = document.getText();
         const lines = text.split('\n');
-          return comments.map(comment => {
-            const anchor = comment.anchor;
-            const originalRange = anchor.originalRange;
+
+        const updatedCommentsPromises = comments.map(async comment => {
+            let anchor = comment.anchor;
             
-            // 1. 首先尝试智能行号调整（处理简单的行号偏移）
-            const adjustedAnchor = this.tryAdjustLineOffset(lines, anchor);
-            
+            // 1. 尝试智能行号调整
+            const adjustedAnchorAttempt = this.tryAdjustLineOffset(lines, { ...anchor });
+
             // 2. 检查调整后的位置是否有效
-            if (this.isOriginalPositionValid(lines, adjustedAnchor)) {
+            if (this.isOriginalPositionValid(lines, adjustedAnchorAttempt)) {
+                const validRange = adjustedAnchorAttempt.originalRange;
+                const currentActualSnippet = this.extractSnippetFromLines(lines, validRange);
+                const beforeLinesCount = 2; // Consistent with createAnchor
+                const afterLinesCount = 2;  // Consistent with createAnchor
+
+                const beforeContext = lines
+                    .slice(Math.max(0, validRange.startLine - beforeLinesCount), validRange.startLine)
+                    .join('\n');
+
+                const afterContext = lines
+                    .slice(validRange.endLine + 1, Math.min(lines.length, validRange.endLine + afterLinesCount + 1))
+                    .join('\n');
+
                 return {
                     ...comment,
                     anchor: {
-                        ...adjustedAnchor,
+                        ...anchor, // Preserve other properties of the old anchor like id
+                        originalRange: validRange,
+                        codeSnippet: currentActualSnippet, // This is already up-to-date
+                        beforeContext, // Update beforeContext
+                        afterContext,  // Update afterContext
                         status: 'valid' as const,
-                        lastValidatedAt: Date.now()
+                        lastValidatedAt: Date.now(),
+                        currentRange: undefined, // Clear previous currentRange and confidence
+                        confidence: undefined
                     }
                 };
             }
@@ -181,10 +494,16 @@ export class CommentPositionTracker {
             const newPosition = this.findNewPosition(lines, anchor);
             
             if (newPosition && this.isPositionChangeReasonable(anchor.originalRange, newPosition.range, newPosition.confidence)) {
+                const newVsCodeRange = new vscode.Range(
+                    newPosition.range.startLine, newPosition.range.startCharacter,
+                    newPosition.range.endLine, newPosition.range.endCharacter
+                );
+                const newAnchor = await this.createAnchor(document, newVsCodeRange);
+
                 return {
                     ...comment,
                     anchor: {
-                        ...anchor,
+                        ...newAnchor,
                         status: 'moved' as const,
                         currentRange: newPosition.range,
                         confidence: newPosition.confidence,
@@ -203,6 +522,7 @@ export class CommentPositionTracker {
                 }
             };
         });
+        return Promise.all(updatedCommentsPromises);
     }
     
     /**
@@ -212,7 +532,9 @@ export class CommentPositionTracker {
         const range = anchor.originalRange;
         
         // 检查行号是否越界
-        if (range.startLine >= lines.length || range.endLine >= lines.length) {
+        if (range.startLine > range.endLine ||
+            range.startLine < 0 || range.startLine >= lines.length ||
+            range.endLine < 0 || range.endLine >= lines.length) {
             return false;
         }
         
@@ -248,174 +570,411 @@ export class CommentPositionTracker {
     /**
      * 使用上下文重新定位评论
      */
-    private findNewPosition(lines: string[], anchor: CommentAnchor): 
+    private findNewPosition(lines: string[], anchor: CommentAnchor):
         { range: CommentRange, confidence: number } | null {
-        
-        const codeSnippet = anchor.codeSnippet.trim();
+
+        const originalCodeSnippet = anchor.codeSnippet;
+        const codeSnippetLines = originalCodeSnippet.trim().split('\n');
+        const isMultiLineSnippet = codeSnippetLines.length > 1;
+
         const beforeContext = anchor.beforeContext?.trim();
         const afterContext = anchor.afterContext?.trim();
-          // 搜索策略1：完整匹配（代码片段 + 上下文）
-        for (let i = 0; i < lines.length; i++) {
-            const currentLine = lines[i];
-              // 必须是精确的代码片段匹配
-            if (currentLine.trim() === codeSnippet.trim()) {
-                // 检查上下文匹配
-                let contextScore = 0;
-                let beforeMatch = false;
-                let afterMatch = false;
-                
-                // 检查前面的上下文（更灵活的搜索范围）
-                if (beforeContext && i > 0) {
-                    // 扩大搜索范围，并且允许部分匹配
-                    for (let j = Math.max(0, i - 5); j < i; j++) {
-                        const contextLine = lines[j].trim();
-                        if (contextLine.includes(beforeContext) || beforeContext.includes(contextLine)) {
-                            contextScore += 0.5;
-                            beforeMatch = true;
-                            break;
-                        }
-                        // 检查关键词匹配
-                        const beforeKeywords = beforeContext.split(/\s+/).filter(w => w.length > 3);
-                        const lineKeywords = contextLine.split(/\s+/).filter(w => w.length > 3);
-                        const commonKeywords = beforeKeywords.filter(kw => lineKeywords.some(lw => lw.includes(kw)));
-                        if (commonKeywords.length >= beforeKeywords.length * 0.7) {
-                            contextScore += 0.3;
-                            beforeMatch = true;
-                            break;
-                        }
-                    }
-                }
-                
-                // 检查后面的上下文
-                if (afterContext && i < lines.length - 1) {
-                    const actualAfter = lines.slice(i + 1, Math.min(lines.length, i + 3)).join('\n').trim();
-                    if (actualAfter.includes(afterContext) || afterContext.includes(actualAfter)) {
-                        contextScore += 0.5;
-                        afterMatch = true;
-                    }
-                }
-                
-                // 提高匹配要求：需要至少一个上下文匹配，且总分≥0.5
-                if (contextScore >= 0.5 && (beforeMatch || afterMatch)) {
-                    const startChar = currentLine.indexOf(codeSnippet.trim());
-                    return {
-                        range: {
-                            startLine: i,
-                            startCharacter: startChar,
-                            endLine: i,
-                            endCharacter: startChar + codeSnippet.trim().length
-                        },
-                        confidence: Math.min(1.0, 0.6 + contextScore)
-                    };
+
+        for (let i = 0; i <= lines.length - codeSnippetLines.length; i++) {
+            let potentialMatch = true;
+
+            for (let j = 0; j < codeSnippetLines.length; j++) {
+                const docLine = lines[i + j];
+                const snippetLine = codeSnippetLines[j];
+                if (docLine.trim() !== snippetLine.trim()) {
+                    potentialMatch = false;
+                    break;
                 }
             }
-        }
-        
-        // 搜索策略1.5：宽松匹配（包含关系但要求更高的上下文分数）
-        for (let i = 0; i < lines.length; i++) {
-            const currentLine = lines[i];
-            
-            if (currentLine.includes(codeSnippet)) {
-                // 检查上下文匹配
+
+            if (potentialMatch) {
                 let contextScore = 0;
-                let beforeMatch = false;
-                let afterMatch = false;
-                
-                // 检查前面的上下文
+                let beforeMatch = !beforeContext;
+                let afterMatch = !afterContext;
+
                 if (beforeContext && i > 0) {
-                    const actualBefore = lines.slice(Math.max(0, i - 2), i).join('\n').trim();
-                    if (actualBefore.includes(beforeContext) || beforeContext.includes(actualBefore)) {
+                    const actualBeforeLines = lines.slice(Math.max(0, i - (anchor.beforeContext?.split('\n').length || 2)), i);
+                    const actualBeforeText = actualBeforeLines.join('\n').trim();
+                    if (actualBeforeText.includes(beforeContext) || beforeContext.includes(actualBeforeText)) {
                         contextScore += 0.5;
                         beforeMatch = true;
                     }
+                } else if (!beforeContext) {
+                    contextScore += 0.25;
                 }
-                
-                // 检查后面的上下文
-                if (afterContext && i < lines.length - 1) {
-                    const actualAfter = lines.slice(i + 1, Math.min(lines.length, i + 3)).join('\n').trim();
-                    if (actualAfter.includes(afterContext) || afterContext.includes(actualAfter)) {
+
+                const snippetEndLineIndex = i + codeSnippetLines.length - 1;
+                if (afterContext && snippetEndLineIndex < lines.length - 1) {
+                    const actualAfterLines = lines.slice(snippetEndLineIndex + 1, Math.min(lines.length, snippetEndLineIndex + 1 + (anchor.afterContext?.split('\n').length || 2)));
+                    const actualAfterText = actualAfterLines.join('\n').trim();
+                    if (actualAfterText.includes(afterContext) || afterContext.includes(actualAfterText)) {
                         contextScore += 0.5;
                         afterMatch = true;
                     }
+                } else if (!afterContext) {
+                    contextScore += 0.25;
                 }
                 
-                // 更严格的匹配要求：需要两个上下文都匹配
-                if (contextScore >= 1.0 && beforeMatch && afterMatch) {
-                    const startChar = currentLine.indexOf(codeSnippet);
+                if ((beforeMatch && afterMatch) || (contextScore >= 0.5 && (beforeMatch || afterMatch))) {
+                    const firstLineInDoc = lines[i];
+                    const lastLineInDoc = lines[snippetEndLineIndex];
+                    const firstSnippetLineTrimmed = codeSnippetLines[0].trim();
+                    const lastSnippetLineTrimmed = codeSnippetLines[codeSnippetLines.length - 1].trim();
+
+                    let startChar = firstLineInDoc.indexOf(firstSnippetLineTrimmed);
+                    if (startChar === -1 && firstSnippetLineTrimmed.length > 0) startChar = firstLineInDoc.indexOf(codeSnippetLines[0]);
+                    if (startChar === -1) startChar = 0;
+
+                    let endChar = -1;
+                    if (lastSnippetLineTrimmed.length > 0) {
+                        endChar = lastLineInDoc.indexOf(lastSnippetLineTrimmed); // Try trimmed first
+                        if (endChar !== -1) {
+                            endChar += lastSnippetLineTrimmed.length;
+                        } else { // Try original if trimmed fails
+                            endChar = lastLineInDoc.indexOf(codeSnippetLines[codeSnippetLines.length - 1]);
+                             if (endChar !== -1) endChar += codeSnippetLines[codeSnippetLines.length - 1].length;
+                        }
+                    }
+                    if (endChar === -1 || (endChar === 0 && lastSnippetLineTrimmed.length > 0) ) endChar = lastLineInDoc.length;
+
+
                     return {
                         range: {
                             startLine: i,
                             startCharacter: startChar,
-                            endLine: i,
-                            endCharacter: startChar + codeSnippet.length
+                            endLine: snippetEndLineIndex,
+                            endCharacter: endChar
                         },
-                        confidence: Math.min(1.0, 0.4 + contextScore)
+                        confidence: Math.min(1.0, 0.7 + contextScore * 0.3)
                     };
                 }
             }
         }
-          // 搜索策略2：模糊匹配（严格限制，仅在确实需要时使用）
-        // 只有在代码片段足够独特时才进行模糊匹配
-        if (codeSnippet.length > 10) {
-            const keywords = codeSnippet.split(/\s+/).filter(word => word.length > 3);
-            
-            if (keywords.length >= 2) {
+ 
+        // NEW: Try to find evolved multi-line position if exact match failed
+        if (isMultiLineSnippet) { // Only if it was a multi-line snippet originally
+            const evolvedPosition = this._findEvolvedMultiLinePosition(lines, anchor, codeSnippetLines, beforeContext, afterContext);
+            if (evolvedPosition) {
+                return evolvedPosition;
+            }
+            // If evolved search also fails for a multi-line snippet,
+            // we might still want to try the single-line logic below,
+            // in case the snippet was drastically reduced to a single recognizable line.
+        }
+ 
+        // Fallback to original single-line logic.
+        // For a multi-line snippet that wasn't found above, codeSnippetLines[0] is its first line.
+        // For a single-line snippet, codeSnippetLines[0] is the snippet itself.
+        const singleCodeSnippetTrimmed = codeSnippetLines[0].trim();
+        // Ensure that we only proceed with single-line logic if there's a valid snippet line to check
+        // and either it was originally a single-line snippet OR it was a multi-line snippet that might have been reduced.
+        if (singleCodeSnippetTrimmed.length > 0) {
+            // Search strategy 1: Exact match for single line
+            for (let i = 0; i < lines.length; i++) {
+                const currentLine = lines[i];
+                if (currentLine.trim() === singleCodeSnippetTrimmed) {
+                    let contextScore = 0;
+                    let beforeMatch = !beforeContext;
+                    let afterMatch = !afterContext;
+
+                    if (beforeContext && i > 0) {
+                        const actualBefore = lines.slice(Math.max(0, i - 2), i).join('\n').trim();
+                        if (actualBefore.includes(beforeContext) || beforeContext.includes(actualBefore)) {
+                            contextScore += 0.5; beforeMatch = true;
+                        }
+                    } else if (!beforeContext) { contextScore += 0.25; }
+
+                    if (afterContext && i < lines.length - 1) {
+                        const actualAfter = lines.slice(i + 1, Math.min(lines.length, i + 3)).join('\n').trim();
+                        if (actualAfter.includes(afterContext) || afterContext.includes(actualAfter)) {
+                            contextScore += 0.5; afterMatch = true;
+                        }
+                    } else if (!afterContext) { contextScore += 0.25; }
+
+                    if ((beforeMatch && afterMatch) || (contextScore >= 0.5 && (beforeMatch || afterMatch))) {
+                        const startChar = currentLine.indexOf(singleCodeSnippetTrimmed);
+                        return {
+                            range: { startLine: i, startCharacter: startChar, endLine: i, endCharacter: startChar + singleCodeSnippetTrimmed.length },
+                            confidence: Math.min(1.0, 0.6 + contextScore)
+                        };
+                    }
+                }
+            }
+            // Search strategy 1.5: Contains match for single line
+            if (singleCodeSnippetTrimmed.length > 5) { // Only for reasonably long snippets
                 for (let i = 0; i < lines.length; i++) {
                     const currentLine = lines[i];
-                    let matchCount = 0;
-                    
-                    for (const keyword of keywords) {
-                        if (currentLine.includes(keyword)) {
-                            matchCount++;
-                        }
-                    }
-                    
-                    // 大幅提高匹配要求：需要80%的关键词匹配，且至少包含主要标识符
-                    const matchRatio = matchCount / keywords.length;
-                    if (matchRatio >= 0.8 && matchCount >= 2) {
-                        // 额外验证：检查是否有上下文支持
-                        let contextSupport = false;
-                        
-                        if (beforeContext && i > 0) {
-                            const actualBefore = lines.slice(Math.max(0, i - 1), i).join('\n').trim();
+                    if (currentLine.includes(singleCodeSnippetTrimmed)) {
+                        let contextScore = 0;
+                        let beforeMatch = !beforeContext;
+                        let afterMatch = !afterContext;
+
+                         if (beforeContext && i > 0) {
+                            const actualBefore = lines.slice(Math.max(0, i - 2), i).join('\n').trim();
                             if (actualBefore.includes(beforeContext) || beforeContext.includes(actualBefore)) {
-                                contextSupport = true;
+                                contextScore += 0.5; beforeMatch = true;
                             }
-                        }
-                        
+                        } else if (!beforeContext) { contextScore += 0.25; }
+
+
                         if (afterContext && i < lines.length - 1) {
-                            const actualAfter = lines.slice(i + 1, Math.min(lines.length, i + 2)).join('\n').trim();
+                            const actualAfter = lines.slice(i + 1, Math.min(lines.length, i + 3)).join('\n').trim();
                             if (actualAfter.includes(afterContext) || afterContext.includes(actualAfter)) {
-                                contextSupport = true;
+                                contextScore += 0.5; afterMatch = true;
                             }
-                        }
-                          // 只有在有上下文支持时才返回模糊匹配结果
-                        if (contextSupport) {                            // 提高模糊匹配的置信度计算
-                            let confidenceBonus = 0;
-                            if (matchRatio >= 0.9) {
-                                confidenceBonus = 0.1;  // 90%以上匹配给予奖励
-                            }
-                            if (matchCount >= 3) {
-                                confidenceBonus += 0.05;  // 多关键词匹配奖励
-                            }
-                            
+                        } else if (!afterContext) { contextScore += 0.25; }
+                        
+                        // For 'includes' match, require stronger context or both contexts
+                        if ((beforeMatch && afterMatch && contextScore >=1.0) || (contextScore >= 0.75 && (beforeMatch || afterMatch))) {
+                             const startChar = currentLine.indexOf(singleCodeSnippetTrimmed);
                             return {
-                                range: {
-                                    startLine: i,
-                                    startCharacter: 0,
-                                    endLine: i,
-                                    endCharacter: currentLine.length
-                                },
-                                confidence: Math.min(0.8, matchRatio * 0.8 + confidenceBonus)  // 提高模糊匹配的置信度
+                                range: { startLine: i, startCharacter: startChar, endLine: i, endCharacter: startChar + singleCodeSnippetTrimmed.length },
+                                confidence: Math.min(1.0, 0.4 + contextScore * 0.8) // Confidence is lower for 'includes'
                             };
                         }
                     }
                 }
             }
         }
-        
+
+
+        // Original fuzzy matching (only for single line snippets if all above fails)
+        if (!isMultiLineSnippet && singleCodeSnippetTrimmed.length > 10) {
+            const keywords = singleCodeSnippetTrimmed.split(/\s+/).filter(word => word.length > 3);
+            if (keywords.length >= 2) {
+                for (let i = 0; i < lines.length; i++) {
+                    const currentLine = lines[i];
+                    let matchCount = 0;
+                    for (const keyword of keywords) {
+                        if (currentLine.includes(keyword)) {
+                            matchCount++;
+                        }
+                    }
+                    const matchRatio = matchCount / keywords.length;
+                    if (matchRatio >= 0.8 && matchCount >= 2) {
+                        let contextSupport = false;
+                        if (beforeContext && i > 0) {
+                            const actualBefore = lines.slice(Math.max(0, i - 1), i).join('\n').trim();
+                            if (actualBefore.includes(beforeContext) || beforeContext.includes(actualBefore)) contextSupport = true;
+                        }
+                        if (!contextSupport && afterContext && i < lines.length - 1) { // check after if before not supportive
+                            const actualAfter = lines.slice(i + 1, Math.min(lines.length, i + 2)).join('\n').trim();
+                            if (actualAfter.includes(afterContext) || afterContext.includes(actualAfter)) contextSupport = true;
+                        }
+                        if (contextSupport || (!beforeContext && !afterContext)) { // If no context required, or context supports
+                            let confidenceBonus = 0;
+                            if (matchRatio >= 0.9) confidenceBonus = 0.1;
+                            if (matchCount >= 3) confidenceBonus += 0.05;
+                            return {
+                                range: { startLine: i, startCharacter: 0, endLine: i, endCharacter: currentLine.length },
+                                confidence: Math.min(0.8, matchRatio * 0.7 + confidenceBonus) // Adjusted base confidence
+                            };
+                        }
+                    }
+                }
+            }
+        }
         return null;
-    }    /**
+    }
+ 
+    /**
+     * NEW: Attempts to find a multi-line snippet that has evolved (e.g., internal lines deleted).
+     * Matches based on the first and last lines of the original snippet.
+     */
+    private _findEvolvedMultiLinePosition(
+        lines: string[],
+        anchor: CommentAnchor,
+        codeSnippetLines: string[], // Original snippet lines
+        beforeContext?: string,
+        afterContext?: string
+    ): { range: CommentRange, confidence: number } | null {
+        if (codeSnippetLines.length === 0) {
+            return null;
+        }
+
+        const firstOriginalLineTrimmed = codeSnippetLines[0]?.trim();
+        // If the original snippet is effectively empty or starts with an empty line that we can't reliably match,
+        // this strategy might not be effective.
+        if (codeSnippetLines[0] === undefined && codeSnippetLines.length === 1) { // Handles case where snippet is just one undefined line
+            return null;
+        }
+        if (firstOriginalLineTrimmed === undefined && codeSnippetLines.length === 1) { // Handles case where snippet is one line that trims to undefined (e.g. only whitespace)
+             return null;
+        }
+        // More robust check for a single, effectively empty, original line
+        if (codeSnippetLines.length === 1 && (codeSnippetLines[0] === undefined || codeSnippetLines[0].trim() === "")) {
+            return null;
+        }
+
+
+        let bestMatch: { range: CommentRange, confidence: number } | null = null;
+
+        for (let docFirstLineCandidateIdx = 0; docFirstLineCandidateIdx < lines.length; docFirstLineCandidateIdx++) {
+            const currentDocFirstLineTrimmed = lines[docFirstLineCandidateIdx].trim();
+            
+            // Match the first line (trimmed content)
+            if (currentDocFirstLineTrimmed === firstOriginalLineTrimmed || (firstOriginalLineTrimmed === "" && currentDocFirstLineTrimmed === "")) {
+                
+                let currentMatchedDocLineIdx = docFirstLineCandidateIdx;
+                const matchedOriginalLinesInfo: { originalIndex: number, docIndex: number }[] =
+                    [{ originalIndex: 0, docIndex: docFirstLineCandidateIdx }];
+                let allOriginalLinesFound = codeSnippetLines.length === 1; // If only one line, it's already found
+
+                if (codeSnippetLines.length > 1) {
+                    // Try to match the rest of the original snippet lines
+                    for (let originalLineIdxToMatch = 1; originalLineIdxToMatch < codeSnippetLines.length; originalLineIdxToMatch++) {
+                        const nextOriginalLineContentTrimmed = codeSnippetLines[originalLineIdxToMatch].trim();
+                        let foundThisOriginalLine = false;
+                        let searchLookaheadLimit = currentMatchedDocLineIdx + 1 + CommentPositionTracker.MAX_SKIPS_BETWEEN_ORIGINAL_LINES;
+
+                        for (let docSearchIdx = currentMatchedDocLineIdx + 1;
+                             docSearchIdx < lines.length && docSearchIdx <= searchLookaheadLimit;
+                             docSearchIdx++) {
+                            
+                            const docLineToCompareTrimmed = lines[docSearchIdx].trim();
+                            if (docLineToCompareTrimmed === nextOriginalLineContentTrimmed) {
+                                currentMatchedDocLineIdx = docSearchIdx;
+                                matchedOriginalLinesInfo.push({ originalIndex: originalLineIdxToMatch, docIndex: docSearchIdx });
+                                foundThisOriginalLine = true;
+                                break;
+                            }
+                        }
+                        if (!foundThisOriginalLine) {
+                            allOriginalLinesFound = false;
+                            break; // Stop trying to match further lines for this candidate
+                        }
+                        if (originalLineIdxToMatch === codeSnippetLines.length - 1) {
+                            allOriginalLinesFound = true; // Reached and matched the last original line
+                        }
+                    }
+                }
+
+                if (allOriginalLinesFound && matchedOriginalLinesInfo.length > 0) {
+                    const newStartLine = matchedOriginalLinesInfo[0].docIndex;
+                    const newEndLine = matchedOriginalLinesInfo[matchedOriginalLinesInfo.length - 1].docIndex;
+
+                    if (newEndLine < newStartLine) continue; // Should not happen
+
+                    // Context Score Calculation
+                    let contextScore = 0;
+                    const beforeContextLinesCount = anchor.beforeContext?.split('\n').length || 2;
+                    const afterContextLinesCount = anchor.afterContext?.split('\n').length || 2;
+
+                    if (beforeContext && newStartLine > 0) {
+                        const actualBefore = lines.slice(Math.max(0, newStartLine - beforeContextLinesCount), newStartLine).join('\n').trim();
+                        if (actualBefore.includes(beforeContext) || beforeContext.includes(actualBefore)) {
+                            contextScore += 0.35;
+                        }
+                    } else if (!beforeContext) {
+                        contextScore += 0.1; // Small bonus if no beforeContext was expected
+                    }
+
+                    if (afterContext && newEndLine < lines.length - 1) {
+                        const actualAfter = lines.slice(newEndLine + 1, Math.min(lines.length, newEndLine + 1 + afterContextLinesCount)).join('\n').trim();
+                        if (actualAfter.includes(afterContext) || afterContext.includes(actualAfter)) {
+                            contextScore += 0.35;
+                        }
+                    } else if (!afterContext) {
+                        contextScore += 0.1; // Small bonus if no afterContext was expected
+                    }
+
+                    // Structural Integrity Score
+                    const numOriginalNonEmptyLines = codeSnippetLines.filter(l => l.trim() !== "").length;
+                    
+                    let structuralIntegrityScore = 0;
+                    if (codeSnippetLines.length > 0) {
+                        if (numOriginalNonEmptyLines > 0) {
+                             structuralIntegrityScore = (matchedOriginalLinesInfo.length / codeSnippetLines.length);
+                        } else {
+                            structuralIntegrityScore = 1.0;
+                        }
+                    }
+
+
+                    // Penalty for excessive gaps or inserted non-empty lines
+                    let penalty = 0;
+                    const newRangeTotalLines = newEndLine - newStartLine + 1;
+                    if (newRangeTotalLines > codeSnippetLines.length + CommentPositionTracker.MAX_SKIPS_BETWEEN_ORIGINAL_LINES * (codeSnippetLines.length > 1 ? codeSnippetLines.length -1 : 0) ) {
+                        penalty += 0.15; // Penalty if the new range is much longer due to skips
+                    }
+                    
+                    let insertedNonEmptyNonOriginalLines = 0;
+                    let currentOriginalMatchPointer = 0;
+                    for (let k = newStartLine; k <= newEndLine; k++) {
+                        if (currentOriginalMatchPointer < matchedOriginalLinesInfo.length && k === matchedOriginalLinesInfo[currentOriginalMatchPointer].docIndex) {
+                            currentOriginalMatchPointer++; // This line in doc is a matched original line
+                        } else if (lines[k].trim() !== "") {
+                            insertedNonEmptyNonOriginalLines++; // This is an inserted non-empty line
+                        }
+                    }
+                    if (insertedNonEmptyNonOriginalLines > 1) { // Allow one unexpected non-empty line
+                        penalty += insertedNonEmptyNonOriginalLines * 0.1;
+                    }
+                    
+                    let confidence = (structuralIntegrityScore * 0.6) + (contextScore * 0.4) - penalty;
+                    confidence = Math.max(0, Math.min(1.0, confidence));
+                    
+                    let adjustedConfidence = confidence;
+                    if (allOriginalLinesFound && structuralIntegrityScore >= 0.9) {
+                        if (penalty <= 0.1 && confidence < 0.65 && confidence >= 0.50) {
+                            adjustedConfidence = Math.min(0.65, confidence + 0.1);
+                        }
+                    }
+
+                    if (adjustedConfidence >= 0.55) { // Confidence threshold
+                        const firstOriginalLineForCharSearch = codeSnippetLines[0];
+                        const lastOriginalLineForCharSearch = codeSnippetLines[matchedOriginalLinesInfo[matchedOriginalLinesInfo.length -1].originalIndex];
+
+                        let startChar = lines[newStartLine].indexOf(firstOriginalLineForCharSearch);
+                         if (firstOriginalLineForCharSearch.trim().length > 0 && lines[newStartLine].indexOf(firstOriginalLineForCharSearch.trim()) !== -1) {
+                            startChar = lines[newStartLine].indexOf(firstOriginalLineForCharSearch.trim());
+                        } else if (startChar === -1) {
+                           startChar = 0; // Fallback if exact (even non-trimmed) not found
+                        }
+
+
+                        let endChar = -1;
+                        const lastDocLineContent = lines[newEndLine];
+                        if (lastOriginalLineForCharSearch.trim().length > 0) {
+                            const tempEndCharTrimmed = lastDocLineContent.lastIndexOf(lastOriginalLineForCharSearch.trim());
+                            if (tempEndCharTrimmed !== -1) {
+                                endChar = tempEndCharTrimmed + lastOriginalLineForCharSearch.trim().length;
+                            }
+                        }
+                        if (endChar === -1) { // Try non-trimmed if trimmed failed or was empty
+                             const tempEndCharNonTrimmed = lastDocLineContent.lastIndexOf(lastOriginalLineForCharSearch);
+                             if (tempEndCharNonTrimmed !== -1) {
+                                 endChar = tempEndCharNonTrimmed + lastOriginalLineForCharSearch.length;
+                             }
+                        }
+                        if (endChar === -1) endChar = lastDocLineContent.length; // Fallback
+
+                        const currentRange: CommentRange = {
+                            startLine: newStartLine,
+                            startCharacter: startChar,
+                            endLine: newEndLine,
+                            endCharacter: endChar
+                        };
+                        const currentCandidate = { range: currentRange, confidence: adjustedConfidence };
+
+                        if (!bestMatch ||
+                            currentCandidate.range.startLine < bestMatch.range.startLine ||
+                            (currentCandidate.range.startLine === bestMatch.range.startLine && currentCandidate.confidence > bestMatch.confidence)) {
+                            bestMatch = currentCandidate;
+                        }
+                    }
+                }
+            }
+        }
+        return bestMatch;
+    }
+ 
+    /**
      * 监听文档变化，实时更新评论位置
      */
     setupDocumentChangeListener(commentService: any): vscode.Disposable {
@@ -606,82 +1165,134 @@ export class CommentPositionTracker {
             // 远距离移动：置信度≥0.8
             return confidence >= 0.8;
         }
-    }
-      /**
+    }    /**
      * 尝试智能调整行号偏移（处理简单的插入/删除行操作）
      */
     private tryAdjustLineOffset(lines: string[], anchor: CommentAnchor): CommentAnchor {
         const originalRange = anchor.originalRange;
-        const codeSnippet = anchor.codeSnippet.trim();
-        
-        // 扩大搜索范围以处理插入空行等情况
-        const searchStart = Math.max(0, originalRange.startLine - 5);
-        const searchEnd = Math.min(lines.length - 1, originalRange.startLine + 10);
-        
-        // 首先尝试精确匹配
-        for (let i = searchStart; i <= searchEnd; i++) {
-            const currentLine = lines[i];
-            
-            // 检查是否找到完全匹配的代码片段
-            if (currentLine.trim() === codeSnippet) {
+        const originalCodeSnippet = anchor.codeSnippet;
+        const codeSnippetLines = originalCodeSnippet.trim().split('\n');
+        const isMultiLineSnippet = codeSnippetLines.length > 1;
+
+        const searchStartLine = Math.max(0, originalRange.startLine - 20);
+        const searchEndLine = Math.min(lines.length - (isMultiLineSnippet ? codeSnippetLines.length : 1), originalRange.startLine + 50);
+
+        for (let i = searchStartLine; i <= searchEndLine; i++) {
+            let potentialMatch = true;
+            let currentActualSnippetLines = [];
+
+            for (let j = 0; j < codeSnippetLines.length; j++) {
+                const docLine = lines[i + j];
+                const snippetLine = codeSnippetLines[j];
+                if (docLine.trim() !== snippetLine.trim()) {
+                    potentialMatch = false;
+                    break;
+                }
+                currentActualSnippetLines.push(docLine);
+            }
+
+            if (potentialMatch) {
                 const lineOffset = i - originalRange.startLine;
-                
+                const newStartLine = i;
+                const newEndLine = i + codeSnippetLines.length - 1;
+
                 if (lineOffset !== 0) {
-                    // 验证上下文以确保这是正确的位置
-                    if (this.validateContextForLineOffset(lines, anchor, i)) {
+                    if (this.validateContextForLineOffset(lines, anchor, newStartLine, newEndLine) || (!anchor.beforeContext && !anchor.afterContext)) {
+                        const firstLineInDoc = lines[newStartLine];
+                        const lastLineInDoc = lines[newEndLine];
+                        const firstSnippetLineTrimmed = codeSnippetLines[0].trim();
+                        const lastSnippetLineTrimmed = codeSnippetLines[codeSnippetLines.length - 1].trim();
+
+                        let startChar = firstLineInDoc.indexOf(firstSnippetLineTrimmed);
+                        if (startChar === -1 && firstSnippetLineTrimmed.length > 0) startChar = firstLineInDoc.indexOf(codeSnippetLines[0]);
+                        if (startChar === -1) startChar = 0;
+
+                        let endChar = -1;
+                        if (lastSnippetLineTrimmed.length > 0) {
+                           endChar = lastLineInDoc.indexOf(lastSnippetLineTrimmed);
+                           if (endChar !== -1) endChar += lastSnippetLineTrimmed.length;
+                           else {
+                               endChar = lastLineInDoc.indexOf(codeSnippetLines[codeSnippetLines.length-1]);
+                               if (endChar !== -1) endChar += codeSnippetLines[codeSnippetLines.length-1].length;
+                           }
+                        }
+                        if (endChar === -1 || (endChar === 0 && lastSnippetLineTrimmed.length > 0)) endChar = lastLineInDoc.length;
+                        
                         return {
                             ...anchor,
                             originalRange: {
-                                startLine: i,
-                                startCharacter: currentLine.indexOf(codeSnippet.trim()),
-                                endLine: i,
-                                endCharacter: currentLine.indexOf(codeSnippet.trim()) + codeSnippet.length
-                            }
+                                startLine: newStartLine,
+                                startCharacter: startChar,
+                                endLine: newEndLine,
+                                endCharacter: endChar
+                            },
+                            codeSnippet: currentActualSnippetLines.join('\n')
                         };
                     }
+                } else {
+                    return {
+                        ...anchor,
+                        codeSnippet: currentActualSnippetLines.join('\n')
+                    };
                 }
             }
         }
         
-        // 如果精确匹配失败，尝试基于上下文的智能调整
+        const singleSnippetLineTrimmed = codeSnippetLines[0].trim();
+        if (!isMultiLineSnippet && singleSnippetLineTrimmed.length > 5) {
+            for (let i = searchStartLine; i <= searchEndLine; i++) { // searchEndLine is for single line here
+                const currentLine = lines[i];
+                if (currentLine.includes(singleSnippetLineTrimmed)) {
+                    const lineOffset = i - originalRange.startLine;
+                    if (Math.abs(lineOffset) <= 15) {
+                        const startChar = currentLine.indexOf(singleSnippetLineTrimmed);
+                        // For "includes", also validate context if available
+                         if (this.validateContextForLineOffset(lines, anchor, i, i) || (!anchor.beforeContext && !anchor.afterContext)) {
+                            return {
+                                ...anchor,
+                                originalRange: {
+                                    startLine: i,
+                                    startCharacter: startChar,
+                                    endLine: i,
+                                    endCharacter: startChar + singleSnippetLineTrimmed.length
+                                },
+                                codeSnippet: currentLine.substring(startChar, startChar + singleSnippetLineTrimmed.length)
+                            };
+                        }
+                    }
+                }
+            }
+        }
         return this.tryContextBasedAdjustment(lines, anchor);
     }
     
     /**
      * 验证行号偏移时的上下文
      */
-    private validateContextForLineOffset(lines: string[], anchor: CommentAnchor, newLineIndex: number): boolean {
+    private validateContextForLineOffset(lines: string[], anchor: CommentAnchor, newStartLineIndex: number, newEndLineIndex: number): boolean {
         const beforeContext = anchor.beforeContext?.trim();
         const afterContext = anchor.afterContext?.trim();
-        
-        // 检查前置上下文
-        if (beforeContext && newLineIndex > 0) {
-            for (let i = Math.max(0, newLineIndex - 3); i < newLineIndex; i++) {
-                const contextLine = lines[i].trim();
-                if (contextLine.includes(beforeContext) || beforeContext.includes(contextLine)) {
-                    // 检查后置上下文（如果存在）
-                    if (!afterContext) return true;
-                    
-                    for (let j = newLineIndex + 1; j < Math.min(lines.length, newLineIndex + 4); j++) {
-                        const afterLine = lines[j].trim();
-                        if (afterLine.includes(afterContext) || afterContext.includes(afterLine)) {
-                            return true;
-                        }
-                    }
-                }
+        let beforeOk = !beforeContext;
+        let afterOk = !afterContext;
+
+        if (beforeContext && newStartLineIndex > 0) {
+            const actualBeforeLines = lines.slice(Math.max(0, newStartLineIndex - (anchor.beforeContext?.split('\n').length || 2)), newStartLineIndex);
+            const actualBeforeText = actualBeforeLines.join('\n').trim();
+            if (actualBeforeText.includes(beforeContext) || beforeContext.includes(actualBeforeText)) {
+                beforeOk = true;
             }
         }
-        
-        // 如果没有前置上下文，只检查后置上下文
-        if (!beforeContext && afterContext && newLineIndex < lines.length - 1) {
-            for (let j = newLineIndex + 1; j < Math.min(lines.length, newLineIndex + 4); j++) {
-                const afterLine = lines[j].trim();
-                if (afterLine.includes(afterContext) || afterContext.includes(afterLine)) {
-                    return true;
-                }
+
+        if (afterContext && newEndLineIndex < lines.length - 1) {
+            const actualAfterLines = lines.slice(newEndLineIndex + 1, Math.min(lines.length, newEndLineIndex + 1 + (anchor.afterContext?.split('\n').length || 2)));
+            const actualAfterText = actualAfterLines.join('\n').trim();
+            if (actualAfterText.includes(afterContext) || afterContext.includes(actualAfterText)) {
+                afterOk = true;
             }
         }
-        
+        // If no context was defined in the anchor, it's considered a match for that part.
+        // Both must be okay (or not defined) to return true.
+        return beforeOk && afterOk;
         // 如果没有上下文，则接受位置变化（假设是简单的行号偏移）
         return !beforeContext && !afterContext;
     }    /**
@@ -749,7 +1360,9 @@ export class CommentPositionTracker {
                                                 break;
                                             }
                                         }
-                                        if (afterContextValid) break;
+                                        if (afterContextValid) {
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -797,7 +1410,9 @@ export class CommentPositionTracker {
         const keywords1 = this.extractKeywords(str1);
         const keywords2 = this.extractKeywords(str2);
         
-        if (keywords1.length === 0 || keywords2.length === 0) return false;
+        if (keywords1.length === 0 || keywords2.length === 0) {
+            return false;
+        }
         
         let matchCount = 0;
         const totalKeywords = Math.max(keywords1.length, keywords2.length);
@@ -849,7 +1464,9 @@ export class CommentPositionTracker {
         if (word1.length > 4 && word2.length > 4) {
             const root1 = word1.substring(0, Math.min(4, word1.length));
             const root2 = word2.substring(0, Math.min(4, word2.length));
-            if (root1 === root2) return true;
+            if (root1 === root2) {
+                return true;
+            }
         }
         
         return false;
@@ -861,7 +1478,9 @@ export class CommentPositionTracker {
         const words1 = str1.split(/\s+/).filter(w => w.length > 2);
         const words2 = str2.split(/\s+/).filter(w => w.length > 2);
         
-        if (words1.length === 0 || words2.length === 0) return 0;
+        if (words1.length === 0 || words2.length === 0) {
+            return 0;
+        }
         
         let matchCount = 0;
         for (const word1 of words1) {
@@ -884,5 +1503,86 @@ export class CommentPositionTracker {
         this.disposables.forEach(d => d.dispose());
         this.documentChangeHandlers.forEach(timeout => clearTimeout(timeout));
         this.documentChangeHandlers.clear();
+    }
+    
+    /**
+     * 设置高级变化检测
+     */
+    private setupAdvancedChangeDetection() {
+        // 监听文件重命名/移动
+        this.disposables.push(
+            vscode.workspace.onDidRenameFiles(e => {
+                this.handleFileRename(e);
+            })
+        );
+    }
+    
+    /**
+     * 处理文件重命名
+     */
+    private handleFileRename(event: vscode.FileRenameEvent) {
+        for (const file of event.files) {
+            const oldUri = file.oldUri.toString();
+            const newUri = file.newUri.toString();
+            
+            // 更新评论位置缓存
+            const commentCache = this.commentPositionCache.get(oldUri);
+            if (commentCache) {
+                this.commentPositionCache.set(newUri, commentCache);
+                this.commentPositionCache.delete(oldUri);
+            }
+            
+            // 更新文档状态缓存
+            const stateCache = this.documentStateCache.get(oldUri);
+            if (stateCache) {
+                this.documentStateCache.set(newUri, stateCache);
+                this.documentStateCache.delete(oldUri);
+            }
+        }
+    }
+    
+    /**
+     * 注册评论到位置缓存
+     */
+    public registerComment(documentUri: string, commentId: string, anchor: CommentAnchor) {
+        if (!this.commentPositionCache.has(documentUri)) {
+            this.commentPositionCache.set(documentUri, new Map());
+        }
+        this.commentPositionCache.get(documentUri)!.set(commentId, anchor);
+    }
+    
+    /**
+     * 从位置缓存中移除评论
+     */
+    public unregisterComment(documentUri: string, commentId: string) {
+        const cache = this.commentPositionCache.get(documentUri);
+        if (cache) {
+            cache.delete(commentId);
+            if (cache.size === 0) {
+                this.commentPositionCache.delete(documentUri);
+            }
+        }
+    }
+    
+    /**
+     * 获取文档的所有评论锚点（用于调试）
+     */
+    public getDocumentCommentAnchors(documentUri: string): Map<string, CommentAnchor> | undefined {
+        return this.commentPositionCache.get(documentUri);
+    }
+    
+    /**
+     * 清理过期的缓存数据
+     */
+    public cleanupCache(maxAge: number = 24 * 60 * 60 * 1000) { // 默认24小时
+        const now = Date.now();
+        
+        // 清理文档状态缓存
+        for (const [uri, state] of this.documentStateCache.entries()) {
+            if (now - state.lastModified > maxAge) {
+                this.documentStateCache.delete(uri);
+                this.commentPositionCache.delete(uri);
+            }
+        }
     }
 }

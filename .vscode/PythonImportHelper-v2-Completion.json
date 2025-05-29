@@ -9,6 +9,69 @@
         "documentation": {}
     },
     {
+        "label": "sys",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "sys",
+        "description": "sys",
+        "detail": "sys",
+        "documentation": {}
+    },
+    {
+        "label": "yaml",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "yaml",
+        "description": "yaml",
+        "detail": "yaml",
+        "documentation": {}
+    },
+    {
+        "label": "re",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "re",
+        "description": "re",
+        "detail": "re",
+        "documentation": {}
+    },
+    {
+        "label": "os",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "os",
+        "description": "os",
+        "detail": "os",
+        "documentation": {}
+    },
+    {
+        "label": "argparse",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "argparse",
+        "description": "argparse",
+        "detail": "argparse",
+        "documentation": {}
+    },
+    {
+        "label": "glob",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "glob",
+        "description": "glob",
+        "detail": "glob",
+        "documentation": {}
+    },
+    {
+        "label": "codecs",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "codecs",
+        "description": "codecs",
+        "detail": "codecs",
+        "documentation": {}
+    },
+    {
         "label": "_Known",
         "kind": 6,
         "importPath": "node_modules.flatted.python.flatted",
@@ -51,6 +114,60 @@
         "description": "test.test",
         "peekOfCode": "def plus(a,b):\n    return a+b\nif __name__ == \"__main__\":\n    print(plus(1,2))\n    print(plus(3,4))\n    print(plus(5,6))\n    print(plus(7,8))\n    print(plus(9,10))\n    print(plus(11,12))\n    print(plus(13,14))",
         "detail": "test.test",
+        "documentation": {}
+    },
+    {
+        "label": "represent_dict_block",
+        "kind": 2,
+        "importPath": "generate_mcp_yaml",
+        "description": "generate_mcp_yaml",
+        "peekOfCode": "def represent_dict_block(dumper, data):\n    return dumper.represent_mapping('tag:yaml.org,2002:map', data, flow_style=False)\nyaml.add_representer(dict, represent_dict_block, Dumper=yaml.SafeDumper)\ndef represent_list_block(dumper, data):\n    return dumper.represent_sequence('tag:yaml.org,2002:seq', data, flow_style=False)\nyaml.add_representer(list, represent_list_block, Dumper=yaml.SafeDumper)\n# --- Helper Functions ---\ndef extract_balanced_json(text):\n    \"\"\"Finds the first '{' and extracts the substring until the matching '}'.\"\"\"\n    start_index = text.find('{')",
+        "detail": "generate_mcp_yaml",
+        "documentation": {}
+    },
+    {
+        "label": "represent_list_block",
+        "kind": 2,
+        "importPath": "generate_mcp_yaml",
+        "description": "generate_mcp_yaml",
+        "peekOfCode": "def represent_list_block(dumper, data):\n    return dumper.represent_sequence('tag:yaml.org,2002:seq', data, flow_style=False)\nyaml.add_representer(list, represent_list_block, Dumper=yaml.SafeDumper)\n# --- Helper Functions ---\ndef extract_balanced_json(text):\n    \"\"\"Finds the first '{' and extracts the substring until the matching '}'.\"\"\"\n    start_index = text.find('{')\n    if start_index == -1: return None\n    brace_level = 0\n    for i, char in enumerate(text[start_index:]):",
+        "detail": "generate_mcp_yaml",
+        "documentation": {}
+    },
+    {
+        "label": "extract_balanced_json",
+        "kind": 2,
+        "importPath": "generate_mcp_yaml",
+        "description": "generate_mcp_yaml",
+        "peekOfCode": "def extract_balanced_json(text):\n    \"\"\"Finds the first '{' and extracts the substring until the matching '}'.\"\"\"\n    start_index = text.find('{')\n    if start_index == -1: return None\n    brace_level = 0\n    for i, char in enumerate(text[start_index:]):\n        if char == '{': brace_level += 1\n        elif char == '}':\n            brace_level -= 1\n            if brace_level == 0: return text[start_index : start_index + i + 1]",
+        "detail": "generate_mcp_yaml",
+        "documentation": {}
+    },
+    {
+        "label": "parse_mcp_servers_md",
+        "kind": 2,
+        "importPath": "generate_mcp_yaml",
+        "description": "generate_mcp_yaml",
+        "peekOfCode": "def parse_mcp_servers_md(markdown_content: str) -> list:\n    \"\"\"\n    Parses MCP server definitions from markdown content.\n    Returns a list of server dictionaries.\n    \"\"\"\n    servers = []\n    markdown_content = markdown_content.replace('\\r\\n', '\\n') # Normalize line endings\n    # --- Define Delimiters ---\n    start_delimiter = \"\\n\\nWhen a server is connected, you can use the server's tools via the `use_mcp_tool` tool, and access the server's resources via the `access_mcp_resource` tool.\\n\\n\" # Adjusted leading newline\n    end_section_delimiter = \"\\n## Creating an MCP Server\"",
+        "detail": "generate_mcp_yaml",
+        "documentation": {}
+    },
+    {
+        "label": "generate_mcp_yaml",
+        "kind": 2,
+        "importPath": "generate_mcp_yaml",
+        "description": "generate_mcp_yaml",
+        "peekOfCode": "def generate_mcp_yaml(servers: list) -> str | None:\n    \"\"\"Generates the indented MCP YAML string from a list of server dicts.\"\"\"\n    if not servers:\n        return \"    servers: []\" # Explicitly return empty list if no servers found\n    try:\n        output_data = {'servers': servers}\n        yaml_output = yaml.dump(output_data, Dumper=yaml.SafeDumper, default_flow_style=None, sort_keys=False, indent=2, width=2000)\n        # Prepend 4 spaces to each line for desired base indentation\n        indented_yaml_output = \"\\n\".join([\"    \" + line for line in yaml_output.splitlines()])\n        # Escape backslashes for regex replacement in target files",
+        "detail": "generate_mcp_yaml",
+        "documentation": {}
+    },
+    {
+        "label": "process_target_file",
+        "kind": 2,
+        "importPath": "generate_mcp_yaml",
+        "description": "generate_mcp_yaml",
+        "peekOfCode": "def process_target_file(file_path: str, args: argparse.Namespace, mcp_yaml_content: str | None):\n    \"\"\"Reads target file, performs all substitutions, and writes back.\"\"\"\n    print(f\"Processing: {file_path}\")\n    try:\n        # Read with UTF-8, handle potential BOM\n        with codecs.open(file_path, 'r', encoding='utf-8-sig') as f:\n            content = f.read()\n        # 1. Basic Placeholders (Match bracketed format used in templates)\n        content = content.replace(\"[OS_PLACEHOLDER]\", args.os or \"Unknown OS\")\n        content = content.replace(\"[SHELL_PLACEHOLDER]\", args.shell or \"Unknown Shell\")",
+        "detail": "generate_mcp_yaml",
         "documentation": {}
     }
 ]
