@@ -10,5 +10,6 @@
 	"typescript.tsc.autoDetect": "off",
 	"codeReviewNotes.defaultAuthor": "Amamiyaren",
 	"codeReviewNotes.showResolvedCommentHighlights": true,
-	"codeReviewNotes.syncMethod": "git"
+	"codeReviewNotes.syncMethod": "git",
+	"gitdoc.enabled": true
 }
